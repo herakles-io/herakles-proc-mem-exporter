@@ -23,6 +23,9 @@ use tokio::{
     time::{interval, Duration},
 };
 use tracing::{debug, error, info, instrument, warn, Level};
+use std::fmt::Write as FmtWrite;
+use std::sync::{atomic::{AtomicU64, Ordering}, Mutex};
+
 
 /// Log level options for CLI parsing
 #[derive(Debug, Clone, ValueEnum)]
@@ -748,6 +751,136 @@ impl MemoryMetrics {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct RunningStat {
+    count: u64,
+    sum: f64,
+    min: f64,
+    max: f64,
+    last: f64,
+}
+
+impl RunningStat {
+    fn add(&mut self, value: f64) {
+        if self.count == 0 {
+            self.min = value;
+            self.max = value;
+            self.last = value;
+            self.sum = value;
+            self.count = 1;
+            return;
+        }
+        self.count += 1;
+        self.sum += value;
+        self.last = value;
+        if value < self.min {
+            self.min = value;
+        }
+        if value > self.max {
+            self.max = value;
+        }
+    }
+
+    fn avg(&self) -> f64 {
+        if self.count == 0 { 0.0 } else { self.sum / (self.count as f64) }
+    }
+}
+
+#[derive(Default)]
+struct Stat {
+    inner: Mutex<RunningStat>,
+}
+
+impl Stat {
+    fn add_sample(&self, value: f64) {
+        if let Ok(mut s) = self.inner.lock() {
+            s.add(value);
+        }
+    }
+
+    fn snapshot(&self) -> (f64, f64, f64, f64, u64) {
+        if let Ok(s) = self.inner.lock() {
+            (s.last, s.avg(), s.max, s.min, s.count)
+        } else {
+            (0.0, 0.0, 0.0, 0.0, 0)
+        }
+    }
+}
+
+#[derive(Default)]
+struct HealthStats {
+    scanned_processes: Stat,
+    scan_duration_seconds: Stat,
+    cache_update_duration_seconds: Stat,
+    total_scans: AtomicU64,
+}
+
+impl HealthStats {
+    fn new() -> Self { Default::default() }
+
+    fn record_scan(&self, scanned: u64, scan_duration_seconds: f64, cache_update_duration_seconds: f64) {
+        self.scanned_processes.add_sample(scanned as f64);
+        self.scan_duration_seconds.add_sample(scan_duration_seconds);
+        self.cache_update_duration_seconds.add_sample(cache_update_duration_seconds);
+        self.total_scans.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn render_table(&self) -> String {
+        let (sc_cur, sc_avg, sc_max, sc_min, _sc_count) = self.scanned_processes.snapshot();
+        let (sd_cur, sd_avg, sd_max, sd_min, _sd_count) = self.scan_duration_seconds.snapshot();
+        let (cu_cur, cu_avg, cu_max, cu_min, _cu_count) = self.cache_update_duration_seconds.snapshot();
+        let total = self.total_scans.load(Ordering::Relaxed);
+
+        let left_col = 26usize;
+        let col_w = 12usize;
+
+        let mut out = String::new();
+
+        writeln!(out, "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "metric",
+            "current",
+            "average",
+            "max",
+            "min",
+            left = left_col,
+            col = col_w).ok();
+
+        writeln!(out, "{}", "-".repeat(left_col + 3 + (col_w + 3) * 4)).ok();
+
+        writeln!(out, "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "scanned processes",
+            format!("{:.0}", sc_cur),
+            format!("{:.1}", sc_avg),
+            format!("{:.0}", sc_max),
+            format!("{:.0}", sc_min),
+            left = left_col,
+            col = col_w).ok();
+
+        writeln!(out, "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "scan duration (s)",
+            format!("{:.3}", sd_cur),
+            format!("{:.3}", sd_avg),
+            format!("{:.3}", sd_max),
+            format!("{:.3}", sd_min),
+            left = left_col,
+            col = col_w).ok();
+
+        writeln!(out, "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "cache_update_duration (s)",
+            format!("{:.3}", cu_cur),
+            format!("{:.3}", cu_avg),
+            format!("{:.3}", cu_max),
+            format!("{:.3}", cu_min),
+            left = left_col,
+            col = col_w).ok();
+
+        writeln!(out).ok();
+        writeln!(out, "number of done scans: {}", total).ok();
+
+        out
+    }
+}
+
 /// Cache state for storing process metrics with update timing information
 #[derive(Clone, Default)]
 struct MetricsCache {
@@ -778,6 +911,7 @@ struct AppState {
     config: Arc<Config>,
     buffer_config: BufferConfig,
     cpu_cache: StdRwLock<HashMap<u32, CpuEntry>>,
+    health_stats: Arc<HealthStats>,
 }
 
 /// Error type for metrics endpoint failures
