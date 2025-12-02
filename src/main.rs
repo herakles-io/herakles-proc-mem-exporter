@@ -1805,11 +1805,20 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                 // Sort by USS for Top-N selection
                 list.sort_by_key(|p| std::cmp::Reverse(p.uss));
 
-                // Use configurable Top-N limits: separate values for "other" vs. other groups
-                let limit = if group == "other" {
-                    state.config.top_n_others.unwrap_or(10)
+                // Treat both "other" and "others" (case-insensitive) as the special bucket.
+                let is_other_group = group.eq_ignore_ascii_case("other")
+                    || group.eq_ignore_ascii_case("others")
+                    || subgroup.eq_ignore_ascii_case("other")
+                    || subgroup.eq_ignore_ascii_case("others");
+
+                // Obtain configured Top-N values with safe defaults.
+                let top_subgroup = state.config.top_n_subgroup.unwrap_or(3);
+                let top_others = state.config.top_n_others.unwrap_or(10);
+                // Ensure the limit is at least 1 (avoid accidental 0)
+                let limit = if is_other_group {
+                    std::cmp::max(1, top_others)
                 } else {
-                    state.config.top_n_subgroup.unwrap_or(3)
+                    std::cmp::max(1, top_subgroup)
                 };
 
                 let rss_total = rss_sum as f64;
