@@ -1693,6 +1693,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     debug!("All metrics registered successfully");
 
+
+    // Initialize HealthStats instance used by AppState
+    let health_stats = Arc::new(HealthStats::new());
     // Create shared application state
     let state = Arc::new(AppState {
         registry,
@@ -1706,6 +1709,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config: Arc::new(config.clone()),
         buffer_config,
         cpu_cache: StdRwLock::new(HashMap::new()),
+        health_stats: health_stats.clone(),
     });
 
     // Perform initial cache population before starting server
@@ -2071,15 +2075,17 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
 #[instrument(skip(state))]
 async fn health_handler(State(state): State<SharedState>) -> impl IntoResponse {
     debug!("Processing /health request");
+
     let cache = state.cache.read().await;
 
-    // Determine health status based on cache state
+    // derive HTTP status from cache state
     let status = if cache.update_success && cache.last_updated.is_some() {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
 
+    // short status message for human-readable heading
     let message = if cache.is_updating {
         "OK - Cache updating"
     } else if cache.update_success {
@@ -2088,8 +2094,11 @@ async fn health_handler(State(state): State<SharedState>) -> impl IntoResponse {
         "Cache update failed"
     };
 
+    // render plain-text table from HealthStats
+    let table = state.health_stats.render_table();
+
     debug!("Health check: {} - {}", status, message);
-    (status, message)
+    (status, format!("{message}\n\n{table}"))
 }
 
 /// -------------------------------------------------------------------
@@ -2109,6 +2118,11 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
         debug!("Cache marked as updating (old snapshot still available)");
     }
 
+    // Record completed scan metrics in HealthStats (call outside cache write-lock)
+    let scanned = results.len() as u64;
+    let scan_duration = start.elapsed().as_secs_f64();
+    state.health_stats.record_scan(scanned, scan_duration, scan_duration);
+    
     // Collect process entries from /proc filesystem
     let entries = collect_proc_entries("/proc", state.config.max_processes);
     debug!("Collected {} process entries from /proc", entries.len());
