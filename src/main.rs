@@ -60,8 +60,8 @@ struct Args {
     command: Option<Commands>,
 
     /// HTTP listen port
-    #[arg(short = 'p', long, default_value_t = 9215)]
-    port: u16,
+    #[arg(short = 'p', long)]
+    port: Option<u16>,
 
     /// Bind to specific interface/IP
     #[arg(long)]
@@ -1282,6 +1282,8 @@ fn command_subgroups(
 /// -------------------------------------------------------------------
 
 /// Resolves configuration from CLI args, config file, and defaults
+// Replace the existing resolve_config() override logic for port with this:
+// This enforces precedence: CLI (if provided) > config file > default.
 fn resolve_config(args: &Args) -> Result<Config, Box<dyn std::error::Error>> {
     let mut config = if args.no_config {
         Config::default()
@@ -1294,8 +1296,9 @@ fn resolve_config(args: &Args) -> Result<Config, Box<dyn std::error::Error>> {
         config.bind = Some(bind_ip.to_string());
     }
 
-    if config.port.is_none() {
-        config.port = Some(args.port);
+    // Only override port if the user supplied it on the CLI.
+    if let Some(cli_port) = args.port {
+        config.port = Some(cli_port);
     }
 
     if args.min_uss_kb.is_some() {
