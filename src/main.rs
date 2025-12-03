@@ -2117,12 +2117,7 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
         state.cache_updating.set(1.0);
         debug!("Cache marked as updating (old snapshot still available)");
     }
-
-    // Record completed scan metrics in HealthStats (call outside cache write-lock)
-    let scanned = results.len() as u64;
-    let scan_duration = start.elapsed().as_secs_f64();
-    state.health_stats.record_scan(scanned, scan_duration, scan_duration);
-    
+   
     // Collect process entries from /proc filesystem
     let entries = collect_proc_entries("/proc", state.config.max_processes);
     debug!("Collected {} process entries from /proc", entries.len());
@@ -2227,7 +2222,12 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
 
         state.cache_updating.set(0.0);
     }
-
+    
+    // Record completed scan metrics in HealthStats (call outside cache write-lock)
+    let scanned = results.len() as u64;
+    let scan_duration = start.elapsed().as_secs_f64();
+    state.health_stats.record_scan(scanned, scan_duration, scan_duration);
+    
     info!(
         "Cache update completed: {} processes (subgroup filters applied at scrape), {} total scanned, {:.2}ms",
         results.len(),
