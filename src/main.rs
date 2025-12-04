@@ -1744,7 +1744,7 @@ fn command_generate_testdata(
     others_count: usize,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!(
+    debug!(
         "Generating test data: min_per_subgroup={}, others_count={}, output={}",
         min_per_subgroup,
         others_count,
@@ -1831,12 +1831,6 @@ fn command_generate_testdata(
     // Write to file as pretty-printed JSON
     let json_content = serde_json::to_string_pretty(&test_data)?;
     fs::write(&output, &json_content)?;
-
-    info!(
-        "✅ Generated test data: {} processes in {}",
-        test_data.processes.len(),
-        output.display()
-    );
 
     println!(
         "✅ Generated test data: {} processes in {}",
