@@ -364,6 +364,9 @@ const DEFAULT_PORT: u16 = 9215;
 const DEFAULT_CACHE_TTL: u64 = 30;
 const BUFFER_CAP: usize = 512 * 1024;
 
+/// Footer text for human-readable HTTP endpoints (not /metrics)
+const FOOTER_TEXT: &str = "Project: https://github.com/herakles-io/herakles-proc-mem-exporter — More info: https://www.herakles.io — Support: proc-mem@herakles.io";
+
 /// Enhanced configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
@@ -2099,7 +2102,7 @@ fn classify_process_raw(process_name: &str) -> (Arc<str>, Arc<str>) {
         .unwrap_or_else(|| (Arc::clone(&OTHER_STR), Arc::clone(&UNKNOWN_STR)))
 }
 
-/// Classification inklusive Config-Regeln (include/exclude, disable_others)
+/// Classification including config rules (include/exclude, disable_others)
 fn classify_process_with_config(process_name: &str, cfg: &Config) -> Option<(Arc<str>, Arc<str>)> {
     let (group, subgroup) = classify_process_raw(process_name);
 
@@ -2820,14 +2823,14 @@ async fn health_handler(State(state): State<SharedState>) -> impl IntoResponse {
 
     let cache = state.cache.read().await;
 
-    // derive HTTP status from cache state
+    // Derive HTTP status from cache state
     let status = if cache.update_success && cache.last_updated.is_some() {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
 
-    // short status message for human-readable heading
+    // Short status message for human-readable heading
     let message = if cache.is_updating {
         "OK - Cache updating"
     } else if cache.update_success {
@@ -2836,14 +2839,19 @@ async fn health_handler(State(state): State<SharedState>) -> impl IntoResponse {
         "Cache update failed"
     };
 
-    // render plain-text table from HealthStats
+    // Render plain-text table from HealthStats
     let table = state.health_stats.render_table();
 
     debug!("Health check: {} - {}", status, message);
-    (status, format!("{message}\n\n{table}"))
+    (
+        status,
+        [("Content-Type", "text/plain; charset=utf-8")],
+        format!("{message}\n\n{table}\n{FOOTER_TEXT}"),
+    )
 }
 
 /// Escapes special HTML characters to prevent XSS attacks
+#[allow(dead_code)]
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -2855,7 +2863,7 @@ fn html_escape(s: &str) -> String {
 /// -------------------------------------------------------------------
 /// CONFIG ENDPOINT HANDLER
 /// -------------------------------------------------------------------
-/// Renders the current configuration as an HTML table
+/// Renders the current configuration as a plain-text key-value list
 #[instrument(skip(state))]
 async fn config_handler(State(state): State<SharedState>) -> impl IntoResponse {
     debug!("Processing /config request");
@@ -2865,220 +2873,252 @@ async fn config_handler(State(state): State<SharedState>) -> impl IntoResponse {
 
     let cfg = &state.config;
 
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Herakles Proc Mem Exporter - Configuration</title>
-    <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            margin: 40px;
-            background-color: #f5f5f5;
-            color: #333;
-        }}
-        h1 {{
-            color: #2c3e50;
-            border-bottom: 2px solid #3498db;
-            padding-bottom: 10px;
-        }}
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-            max-width: 800px;
-            background-color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            border-radius: 8px;
-            overflow: hidden;
-        }}
-        th, td {{
-            padding: 12px 16px;
-            text-align: left;
-            border-bottom: 1px solid #e0e0e0;
-        }}
-        th {{
-            background-color: #3498db;
-            color: white;
-            font-weight: 600;
-        }}
-        tr:hover {{
-            background-color: #f8f9fa;
-        }}
-        tr:last-child td {{
-            border-bottom: none;
-        }}
-        .value {{
-            font-family: 'Monaco', 'Consolas', monospace;
-            color: #27ae60;
-        }}
-        .section {{
-            margin-top: 30px;
-            margin-bottom: 10px;
-            font-size: 1.2em;
-            color: #34495e;
-            font-weight: 600;
-        }}
-    </style>
-</head>
-<body>
-    <h1>Herakles Proc Mem Exporter - Configuration</h1>
-    
-    <div class="section">Server Configuration</div>
-    <table>
-        <tr><th>Parameter</th><th>Value</th></tr>
-        <tr><td>bind</td><td class="value">{}</td></tr>
-        <tr><td>port</td><td class="value">{}</td></tr>
-        <tr><td>cache_ttl</td><td class="value">{} seconds</td></tr>
-    </table>
+    let mut out = String::new();
 
-    <div class="section">Metrics Collection</div>
-    <table>
-        <tr><th>Parameter</th><th>Value</th></tr>
-        <tr><td>min_uss_kb</td><td class="value">{}</td></tr>
-        <tr><td>include_names</td><td class="value">{}</td></tr>
-        <tr><td>exclude_names</td><td class="value">{}</td></tr>
-        <tr><td>parallelism</td><td class="value">{}</td></tr>
-        <tr><td>max_processes</td><td class="value">{}</td></tr>
-        <tr><td>top_n_subgroup</td><td class="value">{}</td></tr>
-        <tr><td>top_n_others</td><td class="value">{}</td></tr>
-    </table>
+    writeln!(out, "HERAKLES PROC MEM EXPORTER - CONFIGURATION").ok();
+    writeln!(out, "==========================================").ok();
+    writeln!(out).ok();
 
-    <div class="section">Performance Tuning</div>
-    <table>
-        <tr><th>Parameter</th><th>Value</th></tr>
-        <tr><td>io_buffer_kb</td><td class="value">{}</td></tr>
-        <tr><td>smaps_buffer_kb</td><td class="value">{}</td></tr>
-        <tr><td>smaps_rollup_buffer_kb</td><td class="value">{}</td></tr>
-    </table>
+    writeln!(out, "SERVER CONFIGURATION").ok();
+    writeln!(out, "--------------------").ok();
+    writeln!(
+        out,
+        "bind:                       {}",
+        cfg.bind.as_deref().unwrap_or(DEFAULT_BIND_ADDR)
+    )
+    .ok();
+    writeln!(
+        out,
+        "port:                       {}",
+        cfg.port.unwrap_or(DEFAULT_PORT)
+    )
+    .ok();
+    writeln!(
+        out,
+        "cache_ttl:                  {} seconds",
+        cfg.cache_ttl.unwrap_or(DEFAULT_CACHE_TTL)
+    )
+    .ok();
+    writeln!(out).ok();
 
-    <div class="section">Feature Flags</div>
-    <table>
-        <tr><th>Parameter</th><th>Value</th></tr>
-        <tr><td>enable_health</td><td class="value">{}</td></tr>
-        <tr><td>enable_telemetry</td><td class="value">{}</td></tr>
-        <tr><td>enable_default_collectors</td><td class="value">{}</td></tr>
-        <tr><td>enable_pprof</td><td class="value">{}</td></tr>
-    </table>
-
-    <div class="section">Metrics Flags</div>
-    <table>
-        <tr><th>Parameter</th><th>Value</th></tr>
-        <tr><td>enable_rss</td><td class="value">{}</td></tr>
-        <tr><td>enable_pss</td><td class="value">{}</td></tr>
-        <tr><td>enable_uss</td><td class="value">{}</td></tr>
-        <tr><td>enable_cpu</td><td class="value">{}</td></tr>
-    </table>
-
-    <div class="section">Classification</div>
-    <table>
-        <tr><th>Parameter</th><th>Value</th></tr>
-        <tr><td>search_mode</td><td class="value">{}</td></tr>
-        <tr><td>search_groups</td><td class="value">{}</td></tr>
-        <tr><td>search_subgroups</td><td class="value">{}</td></tr>
-        <tr><td>disable_others</td><td class="value">{}</td></tr>
-    </table>
-
-    <div class="section">Logging</div>
-    <table>
-        <tr><th>Parameter</th><th>Value</th></tr>
-        <tr><td>log_level</td><td class="value">{}</td></tr>
-        <tr><td>enable_file_logging</td><td class="value">{}</td></tr>
-        <tr><td>log_file</td><td class="value">{}</td></tr>
-    </table>
-
-    <div class="section">Test Data</div>
-    <table>
-        <tr><th>Parameter</th><th>Value</th></tr>
-        <tr><td>test_data_file</td><td class="value">{}</td></tr>
-    </table>
-</body>
-</html>"#,
-        // Server Configuration
-        html_escape(cfg.bind.as_deref().unwrap_or(DEFAULT_BIND_ADDR)),
-        cfg.port.unwrap_or(DEFAULT_PORT),
-        cfg.cache_ttl.unwrap_or(DEFAULT_CACHE_TTL),
-        // Metrics Collection
-        cfg.min_uss_kb.unwrap_or(0),
-        html_escape(
-            &cfg.include_names
-                .as_ref()
-                .map(|v| v.join(", "))
-                .unwrap_or_else(|| "none".to_string())
-        ),
-        html_escape(
-            &cfg.exclude_names
-                .as_ref()
-                .map(|v| v.join(", "))
-                .unwrap_or_else(|| "none".to_string())
-        ),
+    writeln!(out, "METRICS COLLECTION").ok();
+    writeln!(out, "------------------").ok();
+    writeln!(
+        out,
+        "min_uss_kb:                 {}",
+        cfg.min_uss_kb.unwrap_or(0)
+    )
+    .ok();
+    writeln!(
+        out,
+        "include_names:              {}",
+        cfg.include_names
+            .as_ref()
+            .map(|v| v.join(", "))
+            .unwrap_or_else(|| "none".to_string())
+    )
+    .ok();
+    writeln!(
+        out,
+        "exclude_names:              {}",
+        cfg.exclude_names
+            .as_ref()
+            .map(|v| v.join(", "))
+            .unwrap_or_else(|| "none".to_string())
+    )
+    .ok();
+    writeln!(
+        out,
+        "parallelism:                {}",
         cfg.parallelism
             .map(|v| v.to_string())
-            .unwrap_or_else(|| "auto".to_string()),
+            .unwrap_or_else(|| "auto".to_string())
+    )
+    .ok();
+    writeln!(
+        out,
+        "max_processes:              {}",
         cfg.max_processes
             .map(|v| v.to_string())
-            .unwrap_or_else(|| "unlimited".to_string()),
-        cfg.top_n_subgroup.unwrap_or(3),
-        cfg.top_n_others.unwrap_or(10),
-        // Performance Tuning
-        cfg.io_buffer_kb.unwrap_or(256),
-        cfg.smaps_buffer_kb.unwrap_or(512),
-        cfg.smaps_rollup_buffer_kb.unwrap_or(256),
-        // Feature Flags
-        cfg.enable_health.unwrap_or(true),
-        cfg.enable_telemetry.unwrap_or(true),
-        cfg.enable_default_collectors.unwrap_or(true),
-        cfg.enable_pprof.unwrap_or(false),
-        // Metrics Flags
-        cfg.enable_rss.unwrap_or(true),
-        cfg.enable_pss.unwrap_or(true),
-        cfg.enable_uss.unwrap_or(true),
-        cfg.enable_cpu.unwrap_or(true),
-        // Classification
-        html_escape(cfg.search_mode.as_deref().unwrap_or("none")),
-        html_escape(
-            &cfg.search_groups
-                .as_ref()
-                .map(|v| v.join(", "))
-                .unwrap_or_else(|| "none".to_string())
-        ),
-        html_escape(
-            &cfg.search_subgroups
-                .as_ref()
-                .map(|v| v.join(", "))
-                .unwrap_or_else(|| "none".to_string())
-        ),
-        cfg.disable_others.unwrap_or(false),
-        // Logging
-        html_escape(cfg.log_level.as_deref().unwrap_or("info")),
-        cfg.enable_file_logging.unwrap_or(false),
-        html_escape(
-            &cfg.log_file
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "none".to_string())
-        ),
-        // Test Data
-        html_escape(
-            &cfg.test_data_file
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "none".to_string())
-        ),
-    );
+            .unwrap_or_else(|| "unlimited".to_string())
+    )
+    .ok();
+    writeln!(
+        out,
+        "top_n_subgroup:             {}",
+        cfg.top_n_subgroup.unwrap_or(3)
+    )
+    .ok();
+    writeln!(
+        out,
+        "top_n_others:               {}",
+        cfg.top_n_others.unwrap_or(10)
+    )
+    .ok();
+    writeln!(out).ok();
+
+    writeln!(out, "PERFORMANCE TUNING").ok();
+    writeln!(out, "------------------").ok();
+    writeln!(
+        out,
+        "io_buffer_kb:               {}",
+        cfg.io_buffer_kb.unwrap_or(256)
+    )
+    .ok();
+    writeln!(
+        out,
+        "smaps_buffer_kb:            {}",
+        cfg.smaps_buffer_kb.unwrap_or(512)
+    )
+    .ok();
+    writeln!(
+        out,
+        "smaps_rollup_buffer_kb:     {}",
+        cfg.smaps_rollup_buffer_kb.unwrap_or(256)
+    )
+    .ok();
+    writeln!(out).ok();
+
+    writeln!(out, "FEATURE FLAGS").ok();
+    writeln!(out, "-------------").ok();
+    writeln!(
+        out,
+        "enable_health:              {}",
+        cfg.enable_health.unwrap_or(true)
+    )
+    .ok();
+    writeln!(
+        out,
+        "enable_telemetry:           {}",
+        cfg.enable_telemetry.unwrap_or(true)
+    )
+    .ok();
+    writeln!(
+        out,
+        "enable_default_collectors:  {}",
+        cfg.enable_default_collectors.unwrap_or(true)
+    )
+    .ok();
+    writeln!(
+        out,
+        "enable_pprof:               {}",
+        cfg.enable_pprof.unwrap_or(false)
+    )
+    .ok();
+    writeln!(out).ok();
+
+    writeln!(out, "METRICS FLAGS").ok();
+    writeln!(out, "-------------").ok();
+    writeln!(
+        out,
+        "enable_rss:                 {}",
+        cfg.enable_rss.unwrap_or(true)
+    )
+    .ok();
+    writeln!(
+        out,
+        "enable_pss:                 {}",
+        cfg.enable_pss.unwrap_or(true)
+    )
+    .ok();
+    writeln!(
+        out,
+        "enable_uss:                 {}",
+        cfg.enable_uss.unwrap_or(true)
+    )
+    .ok();
+    writeln!(
+        out,
+        "enable_cpu:                 {}",
+        cfg.enable_cpu.unwrap_or(true)
+    )
+    .ok();
+    writeln!(out).ok();
+
+    writeln!(out, "CLASSIFICATION").ok();
+    writeln!(out, "--------------").ok();
+    writeln!(
+        out,
+        "search_mode:                {}",
+        cfg.search_mode.as_deref().unwrap_or("none")
+    )
+    .ok();
+    writeln!(
+        out,
+        "search_groups:              {}",
+        cfg.search_groups
+            .as_ref()
+            .map(|v| v.join(", "))
+            .unwrap_or_else(|| "none".to_string())
+    )
+    .ok();
+    writeln!(
+        out,
+        "search_subgroups:           {}",
+        cfg.search_subgroups
+            .as_ref()
+            .map(|v| v.join(", "))
+            .unwrap_or_else(|| "none".to_string())
+    )
+    .ok();
+    writeln!(
+        out,
+        "disable_others:             {}",
+        cfg.disable_others.unwrap_or(false)
+    )
+    .ok();
+    writeln!(out).ok();
+
+    writeln!(out, "LOGGING").ok();
+    writeln!(out, "-------").ok();
+    writeln!(
+        out,
+        "log_level:                  {}",
+        cfg.log_level.as_deref().unwrap_or("info")
+    )
+    .ok();
+    writeln!(
+        out,
+        "enable_file_logging:        {}",
+        cfg.enable_file_logging.unwrap_or(false)
+    )
+    .ok();
+    writeln!(
+        out,
+        "log_file:                   {}",
+        cfg.log_file
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "none".to_string())
+    )
+    .ok();
+    writeln!(out).ok();
+
+    writeln!(out, "TEST DATA").ok();
+    writeln!(out, "---------").ok();
+    writeln!(
+        out,
+        "test_data_file:             {}",
+        cfg.test_data_file
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "none".to_string())
+    )
+    .ok();
+    writeln!(out).ok();
+    writeln!(out, "{FOOTER_TEXT}").ok();
 
     (
         StatusCode::OK,
-        [("Content-Type", "text/html; charset=utf-8")],
-        html,
+        [("Content-Type", "text/plain; charset=utf-8")],
+        out,
     )
 }
 
 /// -------------------------------------------------------------------
 /// SUBGROUPS ENDPOINT HANDLER
 /// -------------------------------------------------------------------
-/// Renders the monitored subgroups as an HTML table
+/// Renders the monitored subgroups as a plain-text grouped list
 #[instrument(skip(state))]
 async fn subgroups_handler(State(state): State<SharedState>) -> impl IntoResponse {
     debug!("Processing /subgroups request");
@@ -3111,99 +3151,45 @@ async fn subgroups_handler(State(state): State<SharedState>) -> impl IntoRespons
     // Count unique subgroups
     let unique_subgroups_count = sorted_entries.len();
 
-    // Build HTML table rows
-    let mut table_rows = String::new();
+    let mut out = String::new();
+
+    writeln!(out, "HERAKLES PROC MEM EXPORTER - SUBGROUPS").ok();
+    writeln!(out, "======================================").ok();
+    writeln!(out).ok();
+    writeln!(
+        out,
+        "Total patterns: {} | Unique subgroups: {}",
+        SUBGROUPS.len(),
+        unique_subgroups_count
+    )
+    .ok();
+    writeln!(out).ok();
+
+    // Group entries by group name for better readability
+    let mut current_group: Option<String> = None;
     for ((group, subgroup), mut matches) in sorted_entries {
+        // Print group header when group changes
+        if current_group.as_ref() != Some(&group) {
+            if current_group.is_some() {
+                writeln!(out).ok();
+            }
+            writeln!(out, "GROUP: {}", group).ok();
+            writeln!(out, "{}", "-".repeat(40)).ok();
+            current_group = Some(group.clone());
+        }
+
         matches.sort();
         let matches_str = matches.join(", ");
-        table_rows.push_str(&format!(
-            "        <tr><td>{}</td><td>{}</td><td class=\"matches\">{}</td></tr>\n",
-            html_escape(&group),
-            html_escape(&subgroup),
-            html_escape(&matches_str)
-        ));
+        writeln!(out, "  {:<20} -> {}", subgroup, matches_str).ok();
     }
 
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Herakles Proc Mem Exporter - Subgroups</title>
-    <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            margin: 40px;
-            background-color: #f5f5f5;
-            color: #333;
-        }}
-        h1 {{
-            color: #2c3e50;
-            border-bottom: 2px solid #3498db;
-            padding-bottom: 10px;
-        }}
-        .summary {{
-            margin-bottom: 20px;
-            padding: 15px;
-            background-color: #e8f4f8;
-            border-radius: 8px;
-            color: #2c3e50;
-        }}
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-            background-color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            border-radius: 8px;
-            overflow: hidden;
-        }}
-        th, td {{
-            padding: 12px 16px;
-            text-align: left;
-            border-bottom: 1px solid #e0e0e0;
-        }}
-        th {{
-            background-color: #3498db;
-            color: white;
-            font-weight: 600;
-        }}
-        tr:hover {{
-            background-color: #f8f9fa;
-        }}
-        tr:last-child td {{
-            border-bottom: none;
-        }}
-        .matches {{
-            font-family: 'Monaco', 'Consolas', monospace;
-            font-size: 0.9em;
-            color: #27ae60;
-            max-width: 600px;
-            word-wrap: break-word;
-        }}
-    </style>
-</head>
-<body>
-    <h1>Herakles Proc Mem Exporter - Subgroups</h1>
-    
-    <div class="summary">
-        <strong>Total patterns:</strong> {} | <strong>Unique subgroups:</strong> {}
-    </div>
-
-    <table>
-        <tr><th>Group</th><th>Subgroup</th><th>Process Matches</th></tr>
-{}    </table>
-</body>
-</html>"#,
-        SUBGROUPS.len(),
-        unique_subgroups_count,
-        table_rows,
-    );
+    writeln!(out).ok();
+    writeln!(out, "{FOOTER_TEXT}").ok();
 
     (
         StatusCode::OK,
-        [("Content-Type", "text/html; charset=utf-8")],
-        html,
+        [("Content-Type", "text/plain; charset=utf-8")],
+        out,
     )
 }
 
@@ -3229,9 +3215,9 @@ DESCRIPTION: Prometheus exporter for per-process RSS/PSS/USS and CPU metrics
 HTTP ENDPOINTS
 --------------
 GET /metrics     - Prometheus metrics endpoint
-GET /health      - Health check with internal statistics
-GET /config      - Current configuration (HTML)
-GET /subgroups   - Loaded subgroups overview (HTML)
+GET /health      - Health check with internal statistics (plain text)
+GET /config      - Current configuration (plain text)
+GET /subgroups   - Loaded subgroups overview (plain text)
 GET /doc         - This documentation (plain text)
 
 AVAILABLE METRICS
@@ -3311,8 +3297,10 @@ MORE INFORMATION
 ----------------
 GitHub: https://github.com/herakles-io/herakles-proc-mem-exporter
 Documentation: See /config and /subgroups endpoints for runtime info
+
+{}
 "#,
-        version
+        version, FOOTER_TEXT
     );
 
     (
