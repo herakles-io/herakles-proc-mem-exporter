@@ -386,3 +386,7 @@ By contributing, you agree that your contributions will be licensed under the sa
 - [Architecture overview](Architecture.md)
 - [Testing documentation](Testing.md)
 - [Configuration reference](Configuration.md)
+
+## 🔗 Project & Support
+
+Project: https://github.com/herakles-io/herakles-proc-mem-exporter — More info: https://www.herakles.io — Support: proc-mem@herakles.io

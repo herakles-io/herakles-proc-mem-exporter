@@ -372,3 +372,7 @@ uname -r
 - [Configure the exporter](Configuration.md)
 - [Set up Prometheus integration](Prometheus-Integration.md)
 - [Understand the metrics](Metrics-Overview.md)
+
+## 🔗 Project & Support
+
+Project: https://github.com/herakles-io/herakles-proc-mem-exporter — More info: https://www.herakles.io — Support: proc-mem@herakles.io

@@ -459,3 +459,7 @@ subgroups = [
 - [Architecture overview](Architecture.md)
 - [Performance tuning](Performance-Tuning.md)
 - [Configuration reference](Configuration.md)
+
+## 🔗 Project & Support
+
+Project: https://github.com/herakles-io/herakles-proc-mem-exporter — More info: https://www.herakles.io — Support: proc-mem@herakles.io

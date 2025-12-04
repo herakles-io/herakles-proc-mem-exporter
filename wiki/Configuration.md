@@ -401,3 +401,7 @@ enable_pprof: true
 - [Understand the metrics](Metrics-Overview.md)
 - [Set up Prometheus integration](Prometheus-Integration.md)
 - [Performance tuning guide](Performance-Tuning.md)
+
+## 🔗 Project & Support
+
+Project: https://github.com/herakles-io/herakles-proc-mem-exporter — More info: https://www.herakles.io — Support: proc-mem@herakles.io
