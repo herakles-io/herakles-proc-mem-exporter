@@ -1030,6 +1030,11 @@ impl HealthStats {
     }
 
     fn get_last_scan_time_str(&self) -> String {
+        // Time constants for formatting
+        const SECS_PER_DAY: u64 = 86400;
+        const SECS_PER_HOUR: u64 = 3600;
+        const SECS_PER_MINUTE: u64 = 60;
+
         if let Ok(guard) = self.last_scan_time.read() {
             if let Some(last_scan) = *guard {
                 // Calculate time since epoch by using SystemTime
@@ -1037,9 +1042,9 @@ impl HealthStats {
                 let now = SystemTime::now();
                 if let Ok(duration) = now.duration_since(SystemTime::UNIX_EPOCH) {
                     let scan_time_secs = duration.as_secs().saturating_sub(elapsed_since_scan.as_secs());
-                    let hours = (scan_time_secs % 86400) / 3600;
-                    let minutes = (scan_time_secs % 3600) / 60;
-                    let seconds = scan_time_secs % 60;
+                    let hours = (scan_time_secs % SECS_PER_DAY) / SECS_PER_HOUR;
+                    let minutes = (scan_time_secs % SECS_PER_HOUR) / SECS_PER_MINUTE;
+                    let seconds = scan_time_secs % SECS_PER_MINUTE;
                     return format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
                 }
             }
@@ -2725,7 +2730,8 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
     state.cache_ready.notify_waiters();
 
     // Count unique subgroups used in this scan
-    let mut used_subgroups_set: std::collections::HashSet<(Arc<str>, Arc<str>)> = std::collections::HashSet::new();
+    use std::collections::HashSet;
+    let mut used_subgroups_set: HashSet<(Arc<str>, Arc<str>)> = HashSet::new();
     for p in &results {
         let (group, subgroup) = classify_process_raw(&p.name);
         used_subgroups_set.insert((group, subgroup));
@@ -2930,7 +2936,12 @@ fn read_self_memory_mb() -> Option<f64> {
 }
 
 /// Reads the exporter's CPU usage from /proc/self/stat
-/// This provides a snapshot estimate based on total CPU time consumed
+/// 
+/// NOTE: This calculation provides an *average* CPU usage over the exporter's lifetime,
+/// not an instantaneous measurement. For long-running processes, this value trends toward
+/// the average load and may not reflect current CPU activity. This approach is simpler
+/// and doesn't require maintaining state for delta-based calculations, but users should
+/// be aware of this limitation when interpreting the value.
 fn read_self_cpu_percent() -> Option<f64> {
     // CPU percent estimation from /proc/self/stat
     // Fields 14 (utime) and 15 (stime) are in clock ticks
