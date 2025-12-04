@@ -2837,6 +2837,15 @@ async fn health_handler(State(state): State<SharedState>) -> impl IntoResponse {
     (status, format!("{message}\n\n{table}"))
 }
 
+/// Escapes special HTML characters to prevent XSS attacks
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
 /// -------------------------------------------------------------------
 /// CONFIG ENDPOINT HANDLER
 /// -------------------------------------------------------------------
@@ -2981,13 +2990,13 @@ async fn config_handler(State(state): State<SharedState>) -> impl IntoResponse {
 </body>
 </html>"#,
         // Server Configuration
-        cfg.bind.as_deref().unwrap_or(DEFAULT_BIND_ADDR),
+        html_escape(cfg.bind.as_deref().unwrap_or(DEFAULT_BIND_ADDR)),
         cfg.port.unwrap_or(DEFAULT_PORT),
         cfg.cache_ttl.unwrap_or(DEFAULT_CACHE_TTL),
         // Metrics Collection
         cfg.min_uss_kb.unwrap_or(0),
-        cfg.include_names.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string()),
-        cfg.exclude_names.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string()),
+        html_escape(&cfg.include_names.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
+        html_escape(&cfg.exclude_names.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
         cfg.parallelism.map(|v| v.to_string()).unwrap_or_else(|| "auto".to_string()),
         cfg.max_processes.map(|v| v.to_string()).unwrap_or_else(|| "unlimited".to_string()),
         cfg.top_n_subgroup.unwrap_or(3),
@@ -3007,16 +3016,16 @@ async fn config_handler(State(state): State<SharedState>) -> impl IntoResponse {
         cfg.enable_uss.unwrap_or(true),
         cfg.enable_cpu.unwrap_or(true),
         // Classification
-        cfg.search_mode.as_deref().unwrap_or("none"),
-        cfg.search_groups.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string()),
-        cfg.search_subgroups.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string()),
+        html_escape(cfg.search_mode.as_deref().unwrap_or("none")),
+        html_escape(&cfg.search_groups.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
+        html_escape(&cfg.search_subgroups.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
         cfg.disable_others.unwrap_or(false),
         // Logging
-        cfg.log_level.as_deref().unwrap_or("info"),
+        html_escape(cfg.log_level.as_deref().unwrap_or("info")),
         cfg.enable_file_logging.unwrap_or(false),
-        cfg.log_file.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".to_string()),
+        html_escape(&cfg.log_file.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".to_string())),
         // Test Data
-        cfg.test_data_file.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".to_string()),
+        html_escape(&cfg.test_data_file.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".to_string())),
     );
 
     (
@@ -3059,6 +3068,9 @@ async fn subgroups_handler(State(state): State<SharedState>) -> impl IntoRespons
         }
     });
 
+    // Count unique subgroups
+    let unique_subgroups_count = sorted_entries.len();
+
     // Build HTML table rows
     let mut table_rows = String::new();
     for ((group, subgroup), mut matches) in sorted_entries {
@@ -3066,7 +3078,9 @@ async fn subgroups_handler(State(state): State<SharedState>) -> impl IntoRespons
         let matches_str = matches.join(", ");
         table_rows.push_str(&format!(
             "        <tr><td>{}</td><td>{}</td><td class=\"matches\">{}</td></tr>\n",
-            group, subgroup, matches_str
+            html_escape(&group),
+            html_escape(&subgroup),
+            html_escape(&matches_str)
         ));
     }
 
@@ -3133,7 +3147,7 @@ async fn subgroups_handler(State(state): State<SharedState>) -> impl IntoRespons
     <h1>Herakles Proc Mem Exporter - Subgroups</h1>
     
     <div class="summary">
-        <strong>Total patterns:</strong> {} | <strong>Total subgroups loaded</strong>
+        <strong>Total patterns:</strong> {} | <strong>Unique subgroups:</strong> {}
     </div>
 
     <table>
@@ -3142,6 +3156,7 @@ async fn subgroups_handler(State(state): State<SharedState>) -> impl IntoRespons
 </body>
 </html>"#,
         SUBGROUPS.len(),
+        unique_subgroups_count,
         table_rows,
     );
 
