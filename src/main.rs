@@ -1758,15 +1758,17 @@ impl From<TestProcess> for ProcMem {
 }
 
 /// Load test data from JSON file
-fn load_test_data_from_file(path: &Path) -> Result<TestData, Box<dyn std::error::Error>> {
+fn load_test_data_from_file(path: &Path) -> Result<TestData, String> {
     debug!("Loading test data from: {}", path.display());
 
     if !path.exists() {
-        return Err(format!("Test data file not found: {}", path.display()).into());
+        return Err(format!("Test data file not found: {}", path.display()));
     }
 
-    let content = fs::read_to_string(path)?;
-    let test_data: TestData = serde_json::from_str(&content)?;
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("Failed to read test data file: {}", e))?;
+    let test_data: TestData = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse test data JSON: {}", e))?;
 
     info!(
         "Loaded test data version {} from {}",
@@ -2859,12 +2861,8 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
     let results: Vec<ProcMem> = if let Some(test_file) = &state.config.test_data_file {
         info!("Using test data from file: {}", test_file.display());
 
-        // Convert error to String immediately to make it Send-safe
-        let test_data_result: Result<TestData, String> =
-            load_test_data_from_file(test_file).map_err(|e| e.to_string());
-
         // Handle error case first, without any awaits in the error path
-        let test_data = match test_data_result {
+        let test_data = match load_test_data_from_file(test_file) {
             Ok(data) => data,
             Err(err_msg) => {
                 error!("Failed to load test data: {}", err_msg);
