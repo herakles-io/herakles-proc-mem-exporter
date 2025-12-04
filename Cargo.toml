@@ -33,6 +33,12 @@ ahash = "0.8"
 # System calls for runtime configuration (e.g., clock ticks)
 libc = "0.2"
 
+# Random number generation for testdata
+rand = "0.8"
+
+# DateTime handling for testdata timestamp
+chrono = { version = "0.4", features = ["serde"] }
+
 [build-dependencies]
 vergen = { version = "8.0", features = ["build", "git", "gitcl"] }
 
