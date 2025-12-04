@@ -2470,6 +2470,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         app = app.route("/health", get(health_handler));
     }
 
+    // Add config and subgroups endpoints
+    app = app
+        .route("/config", get(config_handler))
+        .route("/subgroups", get(subgroups_handler));
+
     // Conditionally add pprof endpoints for debugging
     if config.enable_pprof.unwrap_or(false) {
         debug!("Debug endpoints enabled at /debug/pprof");
@@ -2830,6 +2835,336 @@ async fn health_handler(State(state): State<SharedState>) -> impl IntoResponse {
 
     debug!("Health check: {} - {}", status, message);
     (status, format!("{message}\n\n{table}"))
+}
+
+/// Escapes special HTML characters to prevent XSS attacks
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
+/// -------------------------------------------------------------------
+/// CONFIG ENDPOINT HANDLER
+/// -------------------------------------------------------------------
+/// Renders the current configuration as an HTML table
+#[instrument(skip(state))]
+async fn config_handler(State(state): State<SharedState>) -> impl IntoResponse {
+    debug!("Processing /config request");
+
+    // Track HTTP request
+    state.health_stats.record_http_request();
+
+    let cfg = &state.config;
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Herakles Proc Mem Exporter - Configuration</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 40px;
+            background-color: #f5f5f5;
+            color: #333;
+        }}
+        h1 {{
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            max-width: 800px;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        th, td {{
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }}
+        th {{
+            background-color: #3498db;
+            color: white;
+            font-weight: 600;
+        }}
+        tr:hover {{
+            background-color: #f8f9fa;
+        }}
+        tr:last-child td {{
+            border-bottom: none;
+        }}
+        .value {{
+            font-family: 'Monaco', 'Consolas', monospace;
+            color: #27ae60;
+        }}
+        .section {{
+            margin-top: 30px;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+            color: #34495e;
+            font-weight: 600;
+        }}
+    </style>
+</head>
+<body>
+    <h1>Herakles Proc Mem Exporter - Configuration</h1>
+    
+    <div class="section">Server Configuration</div>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>bind</td><td class="value">{}</td></tr>
+        <tr><td>port</td><td class="value">{}</td></tr>
+        <tr><td>cache_ttl</td><td class="value">{} seconds</td></tr>
+    </table>
+
+    <div class="section">Metrics Collection</div>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>min_uss_kb</td><td class="value">{}</td></tr>
+        <tr><td>include_names</td><td class="value">{}</td></tr>
+        <tr><td>exclude_names</td><td class="value">{}</td></tr>
+        <tr><td>parallelism</td><td class="value">{}</td></tr>
+        <tr><td>max_processes</td><td class="value">{}</td></tr>
+        <tr><td>top_n_subgroup</td><td class="value">{}</td></tr>
+        <tr><td>top_n_others</td><td class="value">{}</td></tr>
+    </table>
+
+    <div class="section">Performance Tuning</div>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>io_buffer_kb</td><td class="value">{}</td></tr>
+        <tr><td>smaps_buffer_kb</td><td class="value">{}</td></tr>
+        <tr><td>smaps_rollup_buffer_kb</td><td class="value">{}</td></tr>
+    </table>
+
+    <div class="section">Feature Flags</div>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>enable_health</td><td class="value">{}</td></tr>
+        <tr><td>enable_telemetry</td><td class="value">{}</td></tr>
+        <tr><td>enable_default_collectors</td><td class="value">{}</td></tr>
+        <tr><td>enable_pprof</td><td class="value">{}</td></tr>
+    </table>
+
+    <div class="section">Metrics Flags</div>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>enable_rss</td><td class="value">{}</td></tr>
+        <tr><td>enable_pss</td><td class="value">{}</td></tr>
+        <tr><td>enable_uss</td><td class="value">{}</td></tr>
+        <tr><td>enable_cpu</td><td class="value">{}</td></tr>
+    </table>
+
+    <div class="section">Classification</div>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>search_mode</td><td class="value">{}</td></tr>
+        <tr><td>search_groups</td><td class="value">{}</td></tr>
+        <tr><td>search_subgroups</td><td class="value">{}</td></tr>
+        <tr><td>disable_others</td><td class="value">{}</td></tr>
+    </table>
+
+    <div class="section">Logging</div>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>log_level</td><td class="value">{}</td></tr>
+        <tr><td>enable_file_logging</td><td class="value">{}</td></tr>
+        <tr><td>log_file</td><td class="value">{}</td></tr>
+    </table>
+
+    <div class="section">Test Data</div>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>test_data_file</td><td class="value">{}</td></tr>
+    </table>
+</body>
+</html>"#,
+        // Server Configuration
+        html_escape(cfg.bind.as_deref().unwrap_or(DEFAULT_BIND_ADDR)),
+        cfg.port.unwrap_or(DEFAULT_PORT),
+        cfg.cache_ttl.unwrap_or(DEFAULT_CACHE_TTL),
+        // Metrics Collection
+        cfg.min_uss_kb.unwrap_or(0),
+        html_escape(&cfg.include_names.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
+        html_escape(&cfg.exclude_names.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
+        cfg.parallelism.map(|v| v.to_string()).unwrap_or_else(|| "auto".to_string()),
+        cfg.max_processes.map(|v| v.to_string()).unwrap_or_else(|| "unlimited".to_string()),
+        cfg.top_n_subgroup.unwrap_or(3),
+        cfg.top_n_others.unwrap_or(10),
+        // Performance Tuning
+        cfg.io_buffer_kb.unwrap_or(256),
+        cfg.smaps_buffer_kb.unwrap_or(512),
+        cfg.smaps_rollup_buffer_kb.unwrap_or(256),
+        // Feature Flags
+        cfg.enable_health.unwrap_or(true),
+        cfg.enable_telemetry.unwrap_or(true),
+        cfg.enable_default_collectors.unwrap_or(true),
+        cfg.enable_pprof.unwrap_or(false),
+        // Metrics Flags
+        cfg.enable_rss.unwrap_or(true),
+        cfg.enable_pss.unwrap_or(true),
+        cfg.enable_uss.unwrap_or(true),
+        cfg.enable_cpu.unwrap_or(true),
+        // Classification
+        html_escape(cfg.search_mode.as_deref().unwrap_or("none")),
+        html_escape(&cfg.search_groups.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
+        html_escape(&cfg.search_subgroups.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
+        cfg.disable_others.unwrap_or(false),
+        // Logging
+        html_escape(cfg.log_level.as_deref().unwrap_or("info")),
+        cfg.enable_file_logging.unwrap_or(false),
+        html_escape(&cfg.log_file.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".to_string())),
+        // Test Data
+        html_escape(&cfg.test_data_file.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".to_string())),
+    );
+
+    (
+        StatusCode::OK,
+        [("Content-Type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
+/// -------------------------------------------------------------------
+/// SUBGROUPS ENDPOINT HANDLER
+/// -------------------------------------------------------------------
+/// Renders the monitored subgroups as an HTML table
+#[instrument(skip(state))]
+async fn subgroups_handler(State(state): State<SharedState>) -> impl IntoResponse {
+    debug!("Processing /subgroups request");
+
+    // Track HTTP request
+    state.health_stats.record_http_request();
+
+    // Collect unique (group, subgroup) pairs with their associated process name matches
+    let mut subgroup_data: HashMap<(String, String), Vec<String>> = HashMap::new();
+
+    for (process_name, (group, subgroup)) in SUBGROUPS.iter() {
+        let key = (group.to_string(), subgroup.to_string());
+        subgroup_data
+            .entry(key)
+            .or_default()
+            .push(process_name.to_string());
+    }
+
+    // Sort by group then subgroup for consistent output
+    let mut sorted_entries: Vec<_> = subgroup_data.into_iter().collect();
+    sorted_entries.sort_by(|a, b| {
+        let group_cmp = a.0 .0.cmp(&b.0 .0);
+        if group_cmp == std::cmp::Ordering::Equal {
+            a.0 .1.cmp(&b.0 .1)
+        } else {
+            group_cmp
+        }
+    });
+
+    // Count unique subgroups
+    let unique_subgroups_count = sorted_entries.len();
+
+    // Build HTML table rows
+    let mut table_rows = String::new();
+    for ((group, subgroup), mut matches) in sorted_entries {
+        matches.sort();
+        let matches_str = matches.join(", ");
+        table_rows.push_str(&format!(
+            "        <tr><td>{}</td><td>{}</td><td class=\"matches\">{}</td></tr>\n",
+            html_escape(&group),
+            html_escape(&subgroup),
+            html_escape(&matches_str)
+        ));
+    }
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Herakles Proc Mem Exporter - Subgroups</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 40px;
+            background-color: #f5f5f5;
+            color: #333;
+        }}
+        h1 {{
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }}
+        .summary {{
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #e8f4f8;
+            border-radius: 8px;
+            color: #2c3e50;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        th, td {{
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }}
+        th {{
+            background-color: #3498db;
+            color: white;
+            font-weight: 600;
+        }}
+        tr:hover {{
+            background-color: #f8f9fa;
+        }}
+        tr:last-child td {{
+            border-bottom: none;
+        }}
+        .matches {{
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.9em;
+            color: #27ae60;
+            max-width: 600px;
+            word-wrap: break-word;
+        }}
+    </style>
+</head>
+<body>
+    <h1>Herakles Proc Mem Exporter - Subgroups</h1>
+    
+    <div class="summary">
+        <strong>Total patterns:</strong> {} | <strong>Unique subgroups:</strong> {}
+    </div>
+
+    <table>
+        <tr><th>Group</th><th>Subgroup</th><th>Process Matches</th></tr>
+{}    </table>
+</body>
+</html>"#,
+        SUBGROUPS.len(),
+        unique_subgroups_count,
+        table_rows,
+    );
+
+    (
+        StatusCode::OK,
+        [("Content-Type", "text/html; charset=utf-8")],
+        html,
+    )
 }
 
 /// -------------------------------------------------------------------
