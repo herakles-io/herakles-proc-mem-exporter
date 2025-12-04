@@ -158,6 +158,10 @@ struct Args {
     /// Top-N processes to export for "other" group (override config)
     #[arg(long)]
     top_n_others: Option<usize>,
+
+    /// Path to JSON test data file (uses synthetic data instead of /proc)
+    #[arg(short = 't', long)]
+    test_data_file: Option<PathBuf>,
 }
 
 /// Subcommands for additional functionality
@@ -264,10 +268,7 @@ struct SubgroupsConfig {
 }
 
 /// Helper: load subgroups from TOML string into map
-fn load_subgroups_from_str(
-    content: &str,
-    map: &mut HashMap<Arc<str>, (Arc<str>, Arc<str>)>,
-) {
+fn load_subgroups_from_str(content: &str, map: &mut HashMap<Arc<str>, (Arc<str>, Arc<str>)>) {
     let parsed: SubgroupsConfig = match toml::from_str(content) {
         Ok(c) => c,
         Err(e) => {
@@ -296,10 +297,7 @@ fn load_subgroups_from_str(
 }
 
 /// Helper: load subgroups from TOML file path (if exists)
-fn load_subgroups_from_file(
-    path: &str,
-    map: &mut HashMap<Arc<str>, (Arc<str>, Arc<str>)>,
-) {
+fn load_subgroups_from_file(path: &str, map: &mut HashMap<Arc<str>, (Arc<str>, Arc<str>)>) {
     let p = Path::new(path);
     if !p.exists() {
         return;
@@ -421,6 +419,10 @@ struct Config {
     enable_uss: Option<bool>,
     #[serde(alias = "enable-cpu")]
     enable_cpu: Option<bool>,
+
+    /// Path to JSON test data file (uses synthetic data instead of /proc)
+    #[serde(alias = "test-data-file")]
+    test_data_file: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -454,6 +456,7 @@ impl Default for Config {
             enable_pss: Some(true),
             enable_uss: Some(true),
             enable_cpu: Some(true),
+            test_data_file: None,
         }
     }
 }
@@ -1058,7 +1061,9 @@ impl HealthStats {
                 let elapsed_since_scan = last_scan.elapsed();
                 let now = SystemTime::now();
                 if let Ok(duration) = now.duration_since(SystemTime::UNIX_EPOCH) {
-                    let scan_time_secs = duration.as_secs().saturating_sub(elapsed_since_scan.as_secs());
+                    let scan_time_secs = duration
+                        .as_secs()
+                        .saturating_sub(elapsed_since_scan.as_secs());
                     let hours = (scan_time_secs % SECS_PER_DAY) / SECS_PER_HOUR;
                     let minutes = (scan_time_secs % SECS_PER_HOUR) / SECS_PER_MINUTE;
                     let seconds = scan_time_secs % SECS_PER_MINUTE;
@@ -1716,7 +1721,7 @@ fn command_subgroups(
 }
 
 /// Test process entry for JSON serialization
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct TestProcess {
     pid: u32,
     name: String,
@@ -1730,11 +1735,47 @@ struct TestProcess {
 }
 
 /// Root structure for test data JSON file
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct TestData {
     version: String,
     generated_at: String,
     processes: Vec<TestProcess>,
+}
+
+/// Converts a TestProcess from JSON test data into ProcMem for metrics
+impl From<TestProcess> for ProcMem {
+    fn from(tp: TestProcess) -> Self {
+        ProcMem {
+            pid: tp.pid,
+            name: tp.name,
+            rss: tp.rss,
+            pss: tp.pss,
+            uss: tp.uss,
+            cpu_percent: tp.cpu_percent as f32,
+            cpu_time_seconds: tp.cpu_time_seconds as f32,
+        }
+    }
+}
+
+/// Load test data from JSON file
+fn load_test_data_from_file(path: &Path) -> Result<TestData, String> {
+    debug!("Loading test data from: {}", path.display());
+
+    if !path.exists() {
+        return Err(format!("Test data file not found: {}", path.display()));
+    }
+
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("Failed to read test data file: {}", e))?;
+    let test_data: TestData = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse test data JSON: {}", e))?;
+
+    info!(
+        "Loaded test data version {} from {}",
+        test_data.version, test_data.generated_at
+    );
+
+    Ok(test_data)
 }
 
 /// Generates synthetic test data JSON file for testing purposes
@@ -1962,6 +2003,11 @@ fn resolve_config(args: &Args) -> Result<Config, Box<dyn std::error::Error>> {
         config.enable_pprof = Some(true);
     }
 
+    // Test data file: CLI wins if provided
+    if let Some(test_file) = &args.test_data_file {
+        config.test_data_file = Some(test_file.clone());
+    }
+
     Ok(config)
 }
 
@@ -2049,10 +2095,7 @@ fn classify_process_raw(process_name: &str) -> (Arc<str>, Arc<str>) {
 }
 
 /// Classification inklusive Config-Regeln (include/exclude, disable_others)
-fn classify_process_with_config(
-    process_name: &str,
-    cfg: &Config,
-) -> Option<(Arc<str>, Arc<str>)> {
+fn classify_process_with_config(process_name: &str, cfg: &Config) -> Option<(Arc<str>, Arc<str>)> {
     let (group, subgroup) = classify_process_raw(process_name);
 
     // If user explicitly disabled "other" bucket, drop these processes
@@ -2265,7 +2308,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 output,
                 min_per_subgroup,
                 others_count,
-            } => command_generate_testdata(output.clone(), *min_per_subgroup, *others_count, &config),
+            } => {
+                command_generate_testdata(output.clone(), *min_per_subgroup, *others_count, &config)
+            }
         };
     }
 
@@ -2729,7 +2774,9 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
             // Record metrics request statistics
             let request_duration_ms = start.elapsed().as_secs_f64() * 1000.0;
             state.health_stats.record_metrics_endpoint_call();
-            state.health_stats.record_request_duration(request_duration_ms);
+            state
+                .health_stats
+                .record_request_duration(request_duration_ms);
             state.health_stats.record_http_request();
             state.health_stats.record_cache_hit();
 
@@ -2802,10 +2849,6 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
         debug!("Cache marked as updating (old snapshot still available)");
     }
 
-    // Collect process entries from /proc filesystem
-    let entries = collect_proc_entries("/proc", state.config.max_processes);
-    debug!("Collected {} process entries from /proc", entries.len());
-
     // Apply configuration filters
     let min_uss_bytes = state.config.min_uss_kb.unwrap_or(0) * 1024;
 
@@ -2814,70 +2857,134 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
     let included_count = AtomicUsize::new(0);
     let skipped_count = AtomicUsize::new(0);
 
-    // Process entries in parallel and collect metrics
-    let results: Vec<ProcMem> = entries
-        .par_iter()
-        .filter_map(|entry| {
-            let name = match read_process_name(&entry.proc_path) {
-                Some(name) => name,
-                None => {
-                    debug!("Skipping process {}: could not read name", entry.pid);
+    // Collect process metrics either from test data file or /proc filesystem
+    let results: Vec<ProcMem> = if let Some(test_file) = &state.config.test_data_file {
+        info!("Using test data from file: {}", test_file.display());
+
+        // Handle error case first, without any awaits in the error path
+        let test_data = match load_test_data_from_file(test_file) {
+            Ok(data) => data,
+            Err(err_msg) => {
+                error!("Failed to load test data: {}", err_msg);
+                state.health_stats.record_scan_failure();
+                // Mark cache as no longer updating on error
+                {
+                    let mut cache = state.cache.write().await;
+                    cache.is_updating = false;
+                    state.cache_updating.set(0.0);
+                }
+                return Err(err_msg.into());
+            }
+        };
+
+        info!("Loaded {} test processes", test_data.processes.len());
+
+        // Apply filters to test data as well
+        test_data
+            .processes
+            .into_iter()
+            .filter_map(|tp| {
+                // Apply include/exclude filters
+                if !should_include_process(&tp.name, &state.config) {
+                    debug!("Skipping process {}: filtered by name config", tp.name);
                     skipped_count.fetch_add(1, Ordering::Relaxed);
                     return None;
                 }
-            };
 
-            // Apply include/exclude filters
-            if !should_include_process(&name, &state.config) {
-                debug!("Skipping process {}: filtered by name config", name);
-                skipped_count.fetch_add(1, Ordering::Relaxed);
-                return None;
-            }
+                // Apply USS threshold filter
+                if tp.uss < min_uss_bytes {
+                    debug!(
+                        "Skipping process {}: USS {} bytes below threshold {} bytes",
+                        tp.name, tp.uss, min_uss_bytes
+                    );
+                    skipped_count.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                }
 
-            // Parse CPU metrics as delta over last sample
-            let cpu = get_cpu_stat_for_pid(entry.pid, &entry.proc_path, &state.cpu_cache);
+                debug!(
+                    "Including test process {}: {} (RSS: {} MB, PSS: {} MB, USS: {} MB, CPU: {:.6}%)",
+                    tp.pid,
+                    tp.name,
+                    tp.rss / 1024 / 1024,
+                    tp.pss / 1024 / 1024,
+                    tp.uss / 1024 / 1024,
+                    tp.cpu_percent
+                );
 
-            // Parse memory metrics with best available strategy
-            match parse_memory_for_process(&entry.proc_path, &state.buffer_config) {
-                Ok((rss, pss, uss)) => {
-                    if uss < min_uss_bytes {
-                        debug!(
-                            "Skipping process {}: USS {} bytes below threshold {} bytes",
-                            name, uss, min_uss_bytes
-                        );
+                included_count.fetch_add(1, Ordering::Relaxed);
+                Some(ProcMem::from(tp))
+            })
+            .collect()
+    } else {
+        // Collect process entries from /proc filesystem
+        let entries = collect_proc_entries("/proc", state.config.max_processes);
+        debug!("Collected {} process entries from /proc", entries.len());
+
+        // Process entries in parallel and collect metrics
+        entries
+            .par_iter()
+            .filter_map(|entry| {
+                let name = match read_process_name(&entry.proc_path) {
+                    Some(name) => name,
+                    None => {
+                        debug!("Skipping process {}: could not read name", entry.pid);
                         skipped_count.fetch_add(1, Ordering::Relaxed);
                         return None;
                     }
+                };
 
-                    debug!(
-                        "Including process {}: {} (RSS: {} MB, PSS: {} MB, USS: {} MB, CPU: {:.6}%)",
-                        entry.pid,
-                        name,
-                        rss / 1024 / 1024,
-                        pss / 1024 / 1024,
-                        uss / 1024 / 1024,
-                        cpu.cpu_percent
-                    );
-
-                    included_count.fetch_add(1, Ordering::Relaxed);
-                    Some(ProcMem {
-                        pid: entry.pid,
-                        name,
-                        rss,
-                        pss,
-                        uss,
-                        cpu_percent: cpu.cpu_percent as f32,
-                        cpu_time_seconds: cpu.cpu_time_seconds as f32,
-                    })
-                }
-                Err(e) => {
-                    debug!("Skipping process {}: failed to parse memory: {}", name, e);
+                // Apply include/exclude filters
+                if !should_include_process(&name, &state.config) {
+                    debug!("Skipping process {}: filtered by name config", name);
                     skipped_count.fetch_add(1, Ordering::Relaxed);
-                    None
+                    return None;
                 }
-            }
-        })
-        .collect();
+
+                // Parse CPU metrics as delta over last sample
+                let cpu = get_cpu_stat_for_pid(entry.pid, &entry.proc_path, &state.cpu_cache);
+
+                // Parse memory metrics with best available strategy
+                match parse_memory_for_process(&entry.proc_path, &state.buffer_config) {
+                    Ok((rss, pss, uss)) => {
+                        if uss < min_uss_bytes {
+                            debug!(
+                                "Skipping process {}: USS {} bytes below threshold {} bytes",
+                                name, uss, min_uss_bytes
+                            );
+                            skipped_count.fetch_add(1, Ordering::Relaxed);
+                            return None;
+                        }
+
+                        debug!(
+                            "Including process {}: {} (RSS: {} MB, PSS: {} MB, USS: {} MB, CPU: {:.6}%)",
+                            entry.pid,
+                            name,
+                            rss / 1024 / 1024,
+                            pss / 1024 / 1024,
+                            uss / 1024 / 1024,
+                            cpu.cpu_percent
+                        );
+
+                        included_count.fetch_add(1, Ordering::Relaxed);
+                        Some(ProcMem {
+                            pid: entry.pid,
+                            name,
+                            rss,
+                            pss,
+                            uss,
+                            cpu_percent: cpu.cpu_percent as f32,
+                            cpu_time_seconds: cpu.cpu_time_seconds as f32,
+                        })
+                    }
+                    Err(e) => {
+                        debug!("Skipping process {}: failed to parse memory: {}", name, e);
+                        skipped_count.fetch_add(1, Ordering::Relaxed);
+                        None
+                    }
+                }
+            })
+            .collect()
+    };
 
     let final_included = included_count.load(Ordering::Relaxed);
     let final_skipped = skipped_count.load(Ordering::Relaxed);
@@ -2934,7 +3041,9 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
 
     // Read exporter's own resource usage from /proc/self
     let (exporter_mem_mb, exporter_cpu_pct) = read_self_resources();
-    state.health_stats.record_exporter_resources(exporter_mem_mb, exporter_cpu_pct);
+    state
+        .health_stats
+        .record_exporter_resources(exporter_mem_mb, exporter_cpu_pct);
 
     info!(
         "Cache update completed: {} processes (subgroup filters applied at scrape), {} total scanned, {:.2}ms",
@@ -3117,7 +3226,7 @@ fn read_self_memory_mb() -> Option<f64> {
 }
 
 /// Reads the exporter's CPU usage from /proc/self/stat
-/// 
+///
 /// NOTE: This calculation provides an *average* CPU usage over the exporter's lifetime,
 /// not an instantaneous measurement. For long-running processes, this value trends toward
 /// the average load and may not reflect current CPU activity. This approach is simpler
