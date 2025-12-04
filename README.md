@@ -428,3 +428,7 @@ at your option.
 ## 👥 Authors
 
 - Michael Moll <proc-mem@herakles.io> - [Herakles IO](https://herakles.io)
+
+## 🔗 Project & Support
+
+Project: https://github.com/herakles-io/herakles-proc-mem-exporter — More info: https://www.herakles.io — Support: proc-mem@herakles.io

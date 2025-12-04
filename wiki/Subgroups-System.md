@@ -394,3 +394,7 @@ search_groups:
 - [Configure Prometheus integration](Prometheus-Integration.md)
 - [Set up alerting based on subgroups](Alerting-Examples.md)
 - [Performance tuning for large subgroup sets](Performance-Tuning.md)
+
+## 🔗 Project & Support
+
+Project: https://github.com/herakles-io/herakles-proc-mem-exporter — More info: https://www.herakles.io — Support: proc-mem@herakles.io

@@ -114,3 +114,7 @@ herakles_proc_mem_group_rss_bytes_sum{group="web",subgroup="nginx"} 419430400
 - Check the [Troubleshooting](Troubleshooting.md) guide
 - Open an issue on [GitHub](https://github.com/herakles-io/herakles-proc-mem-exporter/issues)
 - Contact: proc-mem@herakles.io
+
+## 🔗 Project & Support
+
+Project: https://github.com/herakles-io/herakles-proc-mem-exporter — More info: https://www.herakles.io — Support: proc-mem@herakles.io

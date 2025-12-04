@@ -56,9 +56,14 @@ enum ConfigFormat {
 #[command(
     name = "herakles-proc-mem-exporter",
     about = "Prometheus exporter for per-process RSS/PSS/USS and CPU metrics",
+    long_about = "Prometheus exporter for per-process RSS/PSS/USS and CPU metrics.\n\n\
+                  A high-performance Prometheus exporter for per-process memory and CPU metrics \
+                  on Linux systems. Provides detailed RSS, PSS, USS memory metrics and CPU usage \
+                  with intelligent process classification.",
     author = "Michael Moll <proc-mem@herakles.io> - Herakles IO",
     version = "0.1.0",
-    propagate_version = true
+    propagate_version = true,
+    after_help = "Project: https://github.com/herakles-io/herakles-proc-mem-exporter — More info: https://www.herakles.io — Support: proc-mem@herakles.io"
 )]
 struct Args {
     #[command(subcommand)]
@@ -2285,7 +2290,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle subcommands
     if let Some(command) = &args.command {
         let config = resolve_config(&args)?;
-        // Validierung auch für Subcommands sinnvoll
+        // Validation is also useful for subcommands
         if let Err(e) = validate_effective_config(&config) {
             eprintln!("❌ Configuration invalid: {}", e);
             std::process::exit(1);
@@ -2996,10 +3001,24 @@ async fn config_handler(State(state): State<SharedState>) -> impl IntoResponse {
         cfg.cache_ttl.unwrap_or(DEFAULT_CACHE_TTL),
         // Metrics Collection
         cfg.min_uss_kb.unwrap_or(0),
-        html_escape(&cfg.include_names.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
-        html_escape(&cfg.exclude_names.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
-        cfg.parallelism.map(|v| v.to_string()).unwrap_or_else(|| "auto".to_string()),
-        cfg.max_processes.map(|v| v.to_string()).unwrap_or_else(|| "unlimited".to_string()),
+        html_escape(
+            &cfg.include_names
+                .as_ref()
+                .map(|v| v.join(", "))
+                .unwrap_or_else(|| "none".to_string())
+        ),
+        html_escape(
+            &cfg.exclude_names
+                .as_ref()
+                .map(|v| v.join(", "))
+                .unwrap_or_else(|| "none".to_string())
+        ),
+        cfg.parallelism
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "auto".to_string()),
+        cfg.max_processes
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unlimited".to_string()),
         cfg.top_n_subgroup.unwrap_or(3),
         cfg.top_n_others.unwrap_or(10),
         // Performance Tuning
@@ -3018,15 +3037,35 @@ async fn config_handler(State(state): State<SharedState>) -> impl IntoResponse {
         cfg.enable_cpu.unwrap_or(true),
         // Classification
         html_escape(cfg.search_mode.as_deref().unwrap_or("none")),
-        html_escape(&cfg.search_groups.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
-        html_escape(&cfg.search_subgroups.as_ref().map(|v| v.join(", ")).unwrap_or_else(|| "none".to_string())),
+        html_escape(
+            &cfg.search_groups
+                .as_ref()
+                .map(|v| v.join(", "))
+                .unwrap_or_else(|| "none".to_string())
+        ),
+        html_escape(
+            &cfg.search_subgroups
+                .as_ref()
+                .map(|v| v.join(", "))
+                .unwrap_or_else(|| "none".to_string())
+        ),
         cfg.disable_others.unwrap_or(false),
         // Logging
         html_escape(cfg.log_level.as_deref().unwrap_or("info")),
         cfg.enable_file_logging.unwrap_or(false),
-        html_escape(&cfg.log_file.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".to_string())),
+        html_escape(
+            &cfg.log_file
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
         // Test Data
-        html_escape(&cfg.test_data_file.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "none".to_string())),
+        html_escape(
+            &cfg.test_data_file
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
     );
 
     (
