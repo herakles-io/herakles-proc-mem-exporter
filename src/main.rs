@@ -319,6 +319,7 @@ fn get_clk_tck() -> f64 {
     #[cfg(unix)]
     {
         // SAFETY: sysconf is safe to call with _SC_CLK_TCK
+        // Returns -1 on error, 0 if undefined - both are handled by the > 0 check
         unsafe {
             let tck = libc::sysconf(libc::_SC_CLK_TCK);
             if tck > 0 {
@@ -326,7 +327,7 @@ fn get_clk_tck() -> f64 {
             }
         }
     }
-    // Fallback to common default
+    // Fallback to common default for error cases or non-Unix platforms
     100.0
 }
 
@@ -1522,11 +1523,11 @@ fn classify_process_with_config(
     let group_match = cfg
         .search_groups
         .as_ref()
-        .is_some_and(|v| v.iter().any(|g| g.as_str() == group.as_ref()));
+        .is_some_and(|v| v.iter().any(|g| g == group.as_ref()));
     let subgroup_match = cfg
         .search_subgroups
         .as_ref()
-        .is_some_and(|v| v.iter().any(|sg| sg.as_str() == subgroup.as_ref()));
+        .is_some_and(|v| v.iter().any(|sg| sg == subgroup.as_ref()));
 
     let allowed = match mode {
         "include" => {
