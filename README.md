@@ -235,6 +235,22 @@ subgroups = [
 | `GET /health` | Health check with internal stats |
 | `GET /config` | Current configuration (HTML) |
 | `GET /subgroups` | Loaded subgroups (HTML) |
+| `GET /doc` | Documentation in plain text format |
+
+## 📖 Quick Documentation Access
+
+View the complete documentation directly from the command line:
+
+```bash
+curl http://localhost:9215/doc
+```
+
+This provides a quick reference for:
+- Available endpoints
+- Metrics overview
+- Configuration options
+- Example PromQL queries
+- CLI commands
 
 ### Prometheus Scrape Configuration
 
