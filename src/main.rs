@@ -929,6 +929,7 @@ struct MetricsCache {
     is_updating: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 struct BufferConfig {
     io_kb: usize,
@@ -1379,7 +1380,7 @@ fn resolve_config(args: &Args) -> Result<Config, Box<dyn std::error::Error>> {
     }
     if let Some(n) = args.top_n_others {
         config.top_n_others = Some(n);
-        }
+    }
 
     // Feature flags
     if args.disable_health {
@@ -1621,11 +1622,30 @@ fn setup_logging(_config: &Config, args: &Args) {
 }
 
 /// Resolve effective buffer sizes (CLI > config > defaults)
-fn resolve_buffer_config(_cfg: &Config, args: &Args) -> BufferConfig {
+
+fn resolve_buffer_config(cfg: &Config, args: &Args) -> BufferConfig {
+    // Precedence: CLI (if explicitly different from its derive default) >
+    //             config file > hard-coded default.
+    let io_kb = if args.io_buffer_kb != 256 {
+        args.io_buffer_kb
+    } else {
+        cfg.io_buffer_kb.unwrap_or(256)
+    };
+    let smaps_kb = if args.smaps_buffer_kb != 512 {
+        args.smaps_buffer_kb
+    } else {
+        cfg.smaps_buffer_kb.unwrap_or(512)
+    };
+    let smaps_rollup_kb = if args.smaps_rollup_buffer_kb != 256 {
+        args.smaps_rollup_buffer_kb
+    } else {
+        cfg.smaps_rollup_buffer_kb.unwrap_or(256)
+    };
+
     BufferConfig {
-        io_kb: args.io_buffer_kb,
-        smaps_kb: args.smaps_buffer_kb,
-        smaps_rollup_kb: args.smaps_rollup_buffer_kb,
+        io_kb,
+        smaps_kb,
+        smaps_rollup_kb,
     }
 }
 
@@ -1778,7 +1798,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start background cache refresh task
     let bg_state = state.clone();
-    let ttl = Duration::from_secs(args.cache_ttl);
+    //let ttl = Duration::from_secs(args.cache_ttl);
+    let ttl = Duration::from_secs(state.config.cache_ttl.unwrap_or(DEFAULT_CACHE_TTL));
 
     let background_task = tokio::spawn(async move {
         let mut int = interval(ttl);
