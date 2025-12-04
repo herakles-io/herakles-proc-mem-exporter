@@ -416,6 +416,66 @@ For detailed documentation, see the [Wiki](wiki/Home.md):
 - [Architecture](wiki/Architecture.md)
 - [Contributing](wiki/Contributing.md)
 
+## 🔧 Buffer Health Monitoring API
+
+The library provides a health monitoring API for tracking internal buffer fill levels. This allows users to monitor buffer usage and make informed decisions about buffer sizing.
+
+### Usage
+
+```rust
+use herakles_proc_mem_exporter::{AppConfig, BufferHealthConfig, HealthState};
+
+// Create configuration with custom thresholds
+let config = AppConfig {
+    io_buffer: BufferHealthConfig {
+        capacity_kb: 256,
+        larger_is_better: false,  // Lower fill is better
+        warn_percent: Some(80.0),
+        critical_percent: Some(95.0),
+    },
+    smaps_buffer: BufferHealthConfig {
+        capacity_kb: 512,
+        larger_is_better: false,
+        warn_percent: Some(80.0),
+        critical_percent: Some(95.0),
+    },
+    smaps_rollup_buffer: BufferHealthConfig {
+        capacity_kb: 256,
+        larger_is_better: false,
+        warn_percent: Some(80.0),
+        critical_percent: Some(95.0),
+    },
+};
+
+// Create health state
+let health_state = HealthState::new(config);
+
+// Update buffer values as they change
+health_state.update_io_buffer_kb(100);
+health_state.update_smaps_buffer_kb(200);
+health_state.update_smaps_rollup_buffer_kb(50);
+
+// Get current health status
+let response = health_state.get_health();
+println!("Overall status: {}", response.overall_status);
+
+for buffer in &response.buffers {
+    println!("{}: {:.1}% ({})", buffer.name, buffer.fill_percent, buffer.status);
+}
+```
+
+### Feature Flags
+
+- `health-actix`: Enables actix-web integration for exposing health endpoints via HTTP
+
+```bash
+# Build with actix-web support
+cargo build --features health-actix
+
+# Run the health server example
+cargo run --example health_server --features health-actix
+```
+
 ## 📄 License
 
 This project is dual-licensed under either:
