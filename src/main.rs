@@ -7,7 +7,12 @@ use once_cell::sync::Lazy;
 use prometheus::{Encoder, Gauge, GaugeVec, Opts, Registry, TextEncoder};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as FmtWrite;
 use std::sync::RwLock as StdRwLock;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 use std::{
     fs,
     io::{BufRead, BufReader},
@@ -23,9 +28,6 @@ use tokio::{
     time::{interval, Duration},
 };
 use tracing::{debug, error, info, instrument, warn, Level};
-use std::fmt::Write as FmtWrite;
-use std::sync::{atomic::{AtomicU64, Ordering}, Mutex};
-
 
 /// Log level options for CLI parsing
 #[derive(Debug, Clone, ValueEnum)]
@@ -146,6 +148,13 @@ struct Args {
     /// Maximum number of processes to scan
     #[arg(long)]
     max_processes: Option<usize>,
+    /// Top-N processes to export per subgroup (override config)
+    #[arg(long)]
+    top_n_subgroup: Option<usize>,
+
+    /// Top-N processes to export for "other" group (override config)
+    #[arg(long)]
+    top_n_others: Option<usize>,
 }
 
 /// Subcommands for additional functionality
@@ -782,7 +791,11 @@ impl RunningStat {
     }
 
     fn avg(&self) -> f64 {
-        if self.count == 0 { 0.0 } else { self.sum / (self.count as f64) }
+        if self.count == 0 {
+            0.0
+        } else {
+            self.sum / (self.count as f64)
+        }
     }
 }
 
@@ -816,19 +829,28 @@ struct HealthStats {
 }
 
 impl HealthStats {
-    fn new() -> Self { Default::default() }
+    fn new() -> Self {
+        Default::default()
+    }
 
-    fn record_scan(&self, scanned: u64, scan_duration_seconds: f64, cache_update_duration_seconds: f64) {
+    fn record_scan(
+        &self,
+        scanned: u64,
+        scan_duration_seconds: f64,
+        cache_update_duration_seconds: f64,
+    ) {
         self.scanned_processes.add_sample(scanned as f64);
         self.scan_duration_seconds.add_sample(scan_duration_seconds);
-        self.cache_update_duration_seconds.add_sample(cache_update_duration_seconds);
+        self.cache_update_duration_seconds
+            .add_sample(cache_update_duration_seconds);
         self.total_scans.fetch_add(1, Ordering::Relaxed);
     }
 
     fn render_table(&self) -> String {
         let (sc_cur, sc_avg, sc_max, sc_min, _sc_count) = self.scanned_processes.snapshot();
         let (sd_cur, sd_avg, sd_max, sd_min, _sd_count) = self.scan_duration_seconds.snapshot();
-        let (cu_cur, cu_avg, cu_max, cu_min, _cu_count) = self.cache_update_duration_seconds.snapshot();
+        let (cu_cur, cu_avg, cu_max, cu_min, _cu_count) =
+            self.cache_update_duration_seconds.snapshot();
         let total = self.total_scans.load(Ordering::Relaxed);
 
         let left_col = 26usize;
@@ -836,43 +858,59 @@ impl HealthStats {
 
         let mut out = String::new();
 
-        writeln!(out, "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
             "metric",
             "current",
             "average",
             "max",
             "min",
             left = left_col,
-            col = col_w).ok();
+            col = col_w
+        )
+        .ok();
 
         writeln!(out, "{}", "-".repeat(left_col + 3 + (col_w + 3) * 4)).ok();
 
-        writeln!(out, "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
             "scanned processes",
             format!("{:.0}", sc_cur),
             format!("{:.1}", sc_avg),
             format!("{:.0}", sc_max),
             format!("{:.0}", sc_min),
             left = left_col,
-            col = col_w).ok();
+            col = col_w
+        )
+        .ok();
 
-        writeln!(out, "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
             "scan duration (s)",
             format!("{:.3}", sd_cur),
             format!("{:.3}", sd_avg),
             format!("{:.3}", sd_max),
             format!("{:.3}", sd_min),
             left = left_col,
-            col = col_w).ok();
+            col = col_w
+        )
+        .ok();
 
-        writeln!(out, "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
             "cache_update_duration (s)",
             format!("{:.3}", cu_cur),
             format!("{:.3}", cu_avg),
             format!("{:.3}", cu_max),
             format!("{:.3}", cu_min),
             left = left_col,
-            col = col_w).ok();
+            col = col_w
+        )
+        .ok();
 
         writeln!(out).ok();
         writeln!(out, "number of done scans: {}", total).ok();
@@ -1335,6 +1373,14 @@ fn resolve_config(args: &Args) -> Result<Config, Box<dyn std::error::Error>> {
         config.smaps_rollup_buffer_kb = Some(args.smaps_rollup_buffer_kb);
     }
 
+    // Top-N overrides: CLI wins if provided
+    if let Some(n) = args.top_n_subgroup {
+        config.top_n_subgroup = Some(n);
+    }
+    if let Some(n) = args.top_n_others {
+        config.top_n_others = Some(n);
+        }
+
     // Feature flags
     if args.disable_health {
         config.enable_health = Some(false);
@@ -1438,11 +1484,13 @@ fn classify_process_with_config(
 ) -> Option<(&'static str, &'static str)> {
     let (group, subgroup) = classify_process_raw(process_name);
 
+    // If user explicitly disabled "other" bucket, drop these processes
     let disable_others = cfg.disable_others.unwrap_or(false);
     if disable_others && group == "other" {
         return None;
     }
 
+    // Apply include/exclude/search-mode logic
     let mode = cfg.search_mode.as_deref().unwrap_or("none");
 
     let group_match = cfg
@@ -1456,20 +1504,26 @@ fn classify_process_with_config(
 
     let allowed = match mode {
         "include" => {
-            // Nur diese Gruppen/Subgroups
+            // Only these groups/subgroups
             group_match || subgroup_match
         }
         "exclude" => {
-            // Alles außer diesen Gruppen/Subgroups
+            // Everything except these groups/subgroups
             !(group_match || subgroup_match)
         }
-        _ => true, // kein Filter
+        _ => true, // no filter
     };
 
-    if allowed {
-        Some((group, subgroup))
+    if !allowed {
+        return None;
+    }
+
+    // Normalize: treat all "unknown" subgroups in the "other" group as "other"
+    // so that subgroup "unknown" does not appear in exports.
+    if group.eq_ignore_ascii_case("other") {
+        Some(("other", "other"))
     } else {
-        None
+        Some((group, subgroup))
     }
 }
 
@@ -1696,7 +1750,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     debug!("All metrics registered successfully");
 
-
     // Initialize HealthStats instance used by AppState
     let health_stats = Arc::new(HealthStats::new());
     // Create shared application state
@@ -1859,14 +1912,29 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
             let enable_cpu = cfg.enable_cpu.unwrap_or(true);
 
             // Aggregation map
+            // Aggregation map
             let mut groups: HashMap<(&'static str, &'static str), Vec<&ProcMem>> = HashMap::new();
             let mut exported_count = 0usize;
+
+            // Enforce an overall limit for processes classified as "other".
+            // CLI/config precedence ensures top_n_others is taken from config (or default).
+            let mut other_exported = 0usize;
+            let other_limit = state.config.top_n_others.unwrap_or(10);
 
             // Populate per-process metrics + prepare aggregation
             for p in &processes_vec {
                 if let Some((group, subgroup)) =
                     classify_process_with_config(&p.name, &state.config)
                 {
+                    // If this is the "other" group, enforce the configured per-group limit.
+                    if group.eq_ignore_ascii_case("other") {
+                        if other_exported >= other_limit {
+                            // skip process to limit cardinality for 'other'
+                            continue;
+                        }
+                        other_exported += 1;
+                    }
+
                     exported_count += 1;
                     let pid_str = p.pid.to_string();
 
@@ -2120,7 +2188,7 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
         state.cache_updating.set(1.0);
         debug!("Cache marked as updating (old snapshot still available)");
     }
-   
+
     // Collect process entries from /proc filesystem
     let entries = collect_proc_entries("/proc", state.config.max_processes);
     debug!("Collected {} process entries from /proc", entries.len());
@@ -2225,12 +2293,14 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
 
         state.cache_updating.set(0.0);
     }
-    
+
     // Record completed scan metrics in HealthStats (call outside cache write-lock)
     let scanned = results.len() as u64;
     let scan_duration = start.elapsed().as_secs_f64();
-    state.health_stats.record_scan(scanned, scan_duration, scan_duration);
-    
+    state
+        .health_stats
+        .record_scan(scanned, scan_duration, scan_duration);
+
     info!(
         "Cache update completed: {} processes (subgroup filters applied at scrape), {} total scanned, {:.2}ms",
         results.len(),
