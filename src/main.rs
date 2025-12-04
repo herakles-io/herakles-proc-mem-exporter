@@ -3179,10 +3179,12 @@ async fn doc_handler(State(state): State<SharedState>) -> impl IntoResponse {
     // Track HTTP request
     state.health_stats.record_http_request();
 
-    let doc = r#"HERAKLES PROCESS MEMORY EXPORTER - DOCUMENTATION
+    let version = env!("CARGO_PKG_VERSION");
+    let doc = format!(
+        r#"HERAKLES PROCESS MEMORY EXPORTER - DOCUMENTATION
 ================================================
 
-VERSION: 0.1.0
+VERSION: {}
 DESCRIPTION: Prometheus exporter for per-process RSS/PSS/USS and CPU metrics
 
 HTTP ENDPOINTS
@@ -3270,7 +3272,9 @@ MORE INFORMATION
 ----------------
 GitHub: https://github.com/herakles-io/herakles-proc-mem-exporter
 Documentation: See /config and /subgroups endpoints for runtime info
-"#;
+"#,
+        version
+    );
 
     (
         StatusCode::OK,
