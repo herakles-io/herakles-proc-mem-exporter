@@ -24,7 +24,7 @@ use std::{
 use tokio::{
     net::TcpListener,
     signal,
-    sync::RwLock,
+    sync::{Notify, RwLock},
     time::{interval, Duration},
 };
 use tracing::{debug, error, info, instrument, warn, Level};
@@ -248,7 +248,7 @@ struct SubgroupsConfig {
 /// Helper: load subgroups from TOML string into map
 fn load_subgroups_from_str(
     content: &str,
-    map: &mut HashMap<&'static str, (&'static str, &'static str)>,
+    map: &mut HashMap<Arc<str>, (Arc<str>, Arc<str>)>,
 ) {
     let parsed: SubgroupsConfig = match toml::from_str(content) {
         Ok(c) => c,
@@ -259,19 +259,19 @@ fn load_subgroups_from_str(
     };
 
     for sg in parsed.subgroups {
-        let group_static: &'static str = Box::leak(sg.group.into_boxed_str());
-        let subgroup_static: &'static str = Box::leak(sg.subgroup.into_boxed_str());
+        let group_arc: Arc<str> = Arc::from(sg.group.as_str());
+        let subgroup_arc: Arc<str> = Arc::from(sg.subgroup.as_str());
 
         if let Some(matches) = sg.matches {
             for m in matches {
-                let key_static: &'static str = Box::leak(m.into_boxed_str());
-                map.insert(key_static, (group_static, subgroup_static));
+                let key_arc: Arc<str> = Arc::from(m.as_str());
+                map.insert(key_arc, (Arc::clone(&group_arc), Arc::clone(&subgroup_arc)));
             }
         }
         if let Some(cmdlines) = sg.cmdline_matches {
             for cmd in cmdlines {
-                let key_static: &'static str = Box::leak(cmd.into_boxed_str());
-                map.insert(key_static, (group_static, subgroup_static));
+                let key_arc: Arc<str> = Arc::from(cmd.as_str());
+                map.insert(key_arc, (Arc::clone(&group_arc), Arc::clone(&subgroup_arc)));
             }
         }
     }
@@ -280,7 +280,7 @@ fn load_subgroups_from_str(
 /// Helper: load subgroups from TOML file path (if exists)
 fn load_subgroups_from_file(
     path: &str,
-    map: &mut HashMap<&'static str, (&'static str, &'static str)>,
+    map: &mut HashMap<Arc<str>, (Arc<str>, Arc<str>)>,
 ) {
     let p = Path::new(path);
     if !p.exists() {
@@ -298,7 +298,7 @@ fn load_subgroups_from_file(
 }
 
 // Static configuration for process subgroups loaded from TOML file(s)
-static SUBGROUPS: Lazy<HashMap<&'static str, (&'static str, &'static str)>> = Lazy::new(|| {
+static SUBGROUPS: Lazy<HashMap<Arc<str>, (Arc<str>, Arc<str>)>> = Lazy::new(|| {
     let mut map = HashMap::new();
 
     // 1) built-in subgroups from embedded file
@@ -313,6 +313,26 @@ static SUBGROUPS: Lazy<HashMap<&'static str, (&'static str, &'static str)>> = La
 
     map
 });
+
+/// Get system clock ticks per second (usually 100, but can vary)
+fn get_clk_tck() -> f64 {
+    #[cfg(unix)]
+    {
+        // SAFETY: sysconf is safe to call with _SC_CLK_TCK
+        // Returns -1 on error, 0 if undefined - both are handled by the > 0 check
+        unsafe {
+            let tck = libc::sysconf(libc::_SC_CLK_TCK);
+            if tck > 0 {
+                return tck as f64;
+            }
+        }
+    }
+    // Fallback to common default for error cases or non-Unix platforms
+    100.0
+}
+
+/// System clock ticks per second (for CPU time calculation)
+static CLK_TCK: Lazy<f64> = Lazy::new(get_clk_tck);
 
 // Type alias for shared application state
 type SharedState = Arc<AppState>;
@@ -951,6 +971,8 @@ struct AppState {
     buffer_config: BufferConfig,
     cpu_cache: StdRwLock<HashMap<u32, CpuEntry>>,
     health_stats: Arc<HealthStats>,
+    /// Notification for cache update completion
+    cache_ready: Arc<Notify>,
 }
 
 /// Error type for metrics endpoint failures
@@ -1470,24 +1492,28 @@ fn show_config(
 /// CLASSIFICATION & CPU
 /// -------------------------------------------------------------------
 
+// Static Arc<str> for default classification values to avoid repeated allocations
+static OTHER_STR: Lazy<Arc<str>> = Lazy::new(|| Arc::from("other"));
+static UNKNOWN_STR: Lazy<Arc<str>> = Lazy::new(|| Arc::from("unknown"));
+
 /// Classifies a process into group and subgroup based on process name (raw)
-fn classify_process_raw(process_name: &str) -> (&'static str, &'static str) {
+fn classify_process_raw(process_name: &str) -> (Arc<str>, Arc<str>) {
     SUBGROUPS
         .get(process_name)
-        .copied()
-        .unwrap_or(("other", "unknown"))
+        .map(|(g, sg)| (Arc::clone(g), Arc::clone(sg)))
+        .unwrap_or_else(|| (Arc::clone(&OTHER_STR), Arc::clone(&UNKNOWN_STR)))
 }
 
 /// Classification inklusive Config-Regeln (include/exclude, disable_others)
 fn classify_process_with_config(
     process_name: &str,
     cfg: &Config,
-) -> Option<(&'static str, &'static str)> {
+) -> Option<(Arc<str>, Arc<str>)> {
     let (group, subgroup) = classify_process_raw(process_name);
 
     // If user explicitly disabled "other" bucket, drop these processes
     let disable_others = cfg.disable_others.unwrap_or(false);
-    if disable_others && group == "other" {
+    if disable_others && group.as_ref() == "other" {
         return None;
     }
 
@@ -1497,11 +1523,11 @@ fn classify_process_with_config(
     let group_match = cfg
         .search_groups
         .as_ref()
-        .map_or(false, |v| v.iter().any(|g| g == group));
+        .is_some_and(|v| v.iter().any(|g| g == group.as_ref()));
     let subgroup_match = cfg
         .search_subgroups
         .as_ref()
-        .map_or(false, |v| v.iter().any(|sg| sg == subgroup));
+        .is_some_and(|v| v.iter().any(|sg| sg == subgroup.as_ref()));
 
     let allowed = match mode {
         "include" => {
@@ -1521,8 +1547,8 @@ fn classify_process_with_config(
 
     // Normalize: treat all "unknown" subgroups in the "other" group as "other"
     // so that subgroup "unknown" does not appear in exports.
-    if group.eq_ignore_ascii_case("other") {
-        Some(("other", "other"))
+    if group.as_ref().eq_ignore_ascii_case("other") {
+        Some((Arc::clone(&OTHER_STR), Arc::clone(&OTHER_STR)))
     } else {
         Some((group, subgroup))
     }
@@ -1541,9 +1567,8 @@ fn parse_cpu_time_seconds(proc_path: &Path) -> Result<f64, std::io::Error> {
     let utime: f64 = parts[13].parse().unwrap_or(0.0);
     let stime: f64 = parts[14].parse().unwrap_or(0.0);
 
-    // Most Linux systems use 100 jiffies per second
-    let jiffies_per_second = 100.0;
-    Ok((utime + stime) / jiffies_per_second)
+    // Use system-detected clock ticks per second
+    Ok((utime + stime) / *CLK_TCK)
 }
 
 /// Returns CPU stats for a PID using delta between samples
@@ -1786,6 +1811,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         buffer_config,
         cpu_cache: StdRwLock::new(HashMap::new()),
         health_stats: health_stats.clone(),
+        cache_ready: Arc::new(Notify::new()),
     });
 
     // Perform initial cache population before starting server
@@ -1934,7 +1960,7 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
 
             // Aggregation map
             // Aggregation map
-            let mut groups: HashMap<(&'static str, &'static str), Vec<&ProcMem>> = HashMap::new();
+            let mut groups: HashMap<(Arc<str>, Arc<str>), Vec<&ProcMem>> = HashMap::new();
             let mut exported_count = 0usize;
 
             // Enforce an overall limit for processes classified as "other".
@@ -1948,7 +1974,7 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                     classify_process_with_config(&p.name, &state.config)
                 {
                     // If this is the "other" group, enforce the configured per-group limit.
-                    if group.eq_ignore_ascii_case("other") {
+                    if group.as_ref().eq_ignore_ascii_case("other") {
                         if other_exported >= other_limit {
                             // skip process to limit cardinality for 'other'
                             continue;
@@ -1962,8 +1988,8 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                     state.metrics.set_for_process(
                         &pid_str,
                         &p.name,
-                        group,
-                        subgroup,
+                        group.as_ref(),
+                        subgroup.as_ref(),
                         p.rss,
                         p.pss,
                         p.uss,
@@ -1997,38 +2023,42 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                     cpu_time_sum += p.cpu_time_seconds as f64;
                 }
 
+                // Get references to the Arc<str> contents for use with prometheus labels
+                let group_ref: &str = group.as_ref();
+                let subgroup_ref: &str = subgroup.as_ref();
+
                 // Set aggregation metrics (respect enable_* flags)
                 if enable_rss {
                     state
                         .metrics
                         .agg_rss_sum
-                        .with_label_values(&[group, subgroup])
+                        .with_label_values(&[group_ref, subgroup_ref])
                         .set(rss_sum as f64);
                 }
                 if enable_pss {
                     state
                         .metrics
                         .agg_pss_sum
-                        .with_label_values(&[group, subgroup])
+                        .with_label_values(&[group_ref, subgroup_ref])
                         .set(pss_sum as f64);
                 }
                 if enable_uss {
                     state
                         .metrics
                         .agg_uss_sum
-                        .with_label_values(&[group, subgroup])
+                        .with_label_values(&[group_ref, subgroup_ref])
                         .set(uss_sum as f64);
                 }
                 if enable_cpu {
                     state
                         .metrics
                         .agg_cpu_percent_sum
-                        .with_label_values(&[group, subgroup])
+                        .with_label_values(&[group_ref, subgroup_ref])
                         .set(cpu_percent_sum);
                     state
                         .metrics
                         .agg_cpu_time_sum
-                        .with_label_values(&[group, subgroup])
+                        .with_label_values(&[group_ref, subgroup_ref])
                         .set(cpu_time_sum);
                 }
 
@@ -2036,10 +2066,10 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                 list.sort_by_key(|p| std::cmp::Reverse(p.uss));
 
                 // Treat both "other" and "others" (case-insensitive) as the special bucket.
-                let is_other_group = group.eq_ignore_ascii_case("other")
-                    || group.eq_ignore_ascii_case("others")
-                    || subgroup.eq_ignore_ascii_case("other")
-                    || subgroup.eq_ignore_ascii_case("others");
+                let is_other_group = group_ref.eq_ignore_ascii_case("other")
+                    || group_ref.eq_ignore_ascii_case("others")
+                    || subgroup_ref.eq_ignore_ascii_case("other")
+                    || subgroup_ref.eq_ignore_ascii_case("others");
 
                 // Obtain configured Top-N values with safe defaults.
                 let top_subgroup = state.config.top_n_subgroup.unwrap_or(3);
@@ -2066,33 +2096,33 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                         state
                             .metrics
                             .top_rss
-                            .with_label_values(&[group, subgroup, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
                             .set(p.rss as f64);
                     }
                     if enable_pss {
                         state
                             .metrics
                             .top_pss
-                            .with_label_values(&[group, subgroup, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
                             .set(p.pss as f64);
                     }
                     if enable_uss {
                         state
                             .metrics
                             .top_uss
-                            .with_label_values(&[group, subgroup, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
                             .set(p.uss as f64);
                     }
                     if enable_cpu {
                         state
                             .metrics
                             .top_cpu_percent
-                            .with_label_values(&[group, subgroup, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
                             .set(p.cpu_percent as f64);
                         state
                             .metrics
                             .top_cpu_time
-                            .with_label_values(&[group, subgroup, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
                             .set(p.cpu_time_seconds as f64);
                     }
 
@@ -2102,7 +2132,7 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                         state
                             .metrics
                             .top_cpu_percent_of_subgroup
-                            .with_label_values(&[group, subgroup, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
                             .set(pct);
                     }
 
@@ -2111,7 +2141,7 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                         state
                             .metrics
                             .top_rss_percent_of_subgroup
-                            .with_label_values(&[group, subgroup, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
                             .set(pct);
                     }
 
@@ -2120,7 +2150,7 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                         state
                             .metrics
                             .top_pss_percent_of_subgroup
-                            .with_label_values(&[group, subgroup, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
                             .set(pct);
                     }
 
@@ -2129,7 +2159,7 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                         state
                             .metrics
                             .top_uss_percent_of_subgroup
-                            .with_label_values(&[group, subgroup, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
                             .set(pct);
                     }
                 }
@@ -2157,7 +2187,8 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
         }
 
         drop(cache_guard);
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        // Wait for notification that cache update is complete instead of busy-waiting
+        state.cache_ready.notified().await;
     }
 }
 
@@ -2314,6 +2345,9 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
 
         state.cache_updating.set(0.0);
     }
+
+    // Notify all waiting handlers that cache update is complete
+    state.cache_ready.notify_waiters();
 
     // Record completed scan metrics in HealthStats (call outside cache write-lock)
     let scanned = results.len() as u64;

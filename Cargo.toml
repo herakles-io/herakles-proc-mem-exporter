@@ -30,6 +30,9 @@ tracing-subscriber = "0.3"
 # Optional: Für bessere Performance
 ahash = "0.8"
 
+# System calls for runtime configuration (e.g., clock ticks)
+libc = "0.2"
+
 [build-dependencies]
 vergen = { version = "8.0", features = ["build", "git", "gitcl"] }
 
