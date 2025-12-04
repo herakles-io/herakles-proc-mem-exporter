@@ -75,6 +75,20 @@ scrape_configs:
 curl http://localhost:9215/metrics | grep herakles_proc_mem
 ```
 
+## 📖 Quick Reference
+
+For a quick overview of all available features, you can access the documentation endpoint:
+
+```bash
+curl http://localhost:9215/doc
+```
+
+This provides instant access to:
+- All HTTP endpoints
+- Available metrics
+- Configuration options
+- Example queries
+
 ## 📊 Sample Output
 
 ```
