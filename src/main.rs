@@ -14,12 +14,13 @@ use std::sync::{
     Mutex,
 };
 use std::{
+    collections::VecDeque,
     fs,
     io::{BufRead, BufReader},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 use tokio::{
     net::TcpListener,
@@ -840,12 +841,96 @@ impl Stat {
     }
 }
 
-#[derive(Default)]
+/// Thread-safe circular buffer for tracking HTTP request timestamps
+struct RequestTimestamps {
+    inner: Mutex<VecDeque<Instant>>,
+}
+
+impl Default for RequestTimestamps {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(VecDeque::with_capacity(1024)),
+        }
+    }
+}
+
+impl RequestTimestamps {
+    fn record(&self) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.push_back(Instant::now());
+            // Keep only last 10 minutes of timestamps to avoid unbounded growth
+            let cutoff = Instant::now() - std::time::Duration::from_secs(600);
+            while guard.front().is_some_and(|&t| t < cutoff) {
+                guard.pop_front();
+            }
+        }
+    }
+
+    fn count_last_minute(&self) -> u64 {
+        if let Ok(guard) = self.inner.lock() {
+            let cutoff = Instant::now() - std::time::Duration::from_secs(60);
+            guard.iter().filter(|&&t| t >= cutoff).count() as u64
+        } else {
+            0
+        }
+    }
+}
+
 struct HealthStats {
+    // Existing fields
     scanned_processes: Stat,
     scan_duration_seconds: Stat,
     cache_update_duration_seconds: Stat,
     total_scans: AtomicU64,
+
+    // NEW: Scan performance
+    scan_success_count: AtomicU64,
+    scan_failure_count: AtomicU64,
+    used_subgroups: Stat,
+
+    // NEW: Cache performance
+    cache_size: Stat,
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
+
+    // NEW: HTTP server stats
+    http_request_timestamps: RequestTimestamps,
+    request_duration_ms: Stat,
+    label_cardinality: Stat,
+    metrics_endpoint_calls: AtomicU64,
+
+    // NEW: Exporter resources
+    exporter_memory_mb: Stat,
+    exporter_cpu_percent: Stat,
+
+    // NEW: Timing
+    start_time: Instant,
+    last_scan_time: StdRwLock<Option<Instant>>,
+}
+
+impl Default for HealthStats {
+    fn default() -> Self {
+        Self {
+            scanned_processes: Stat::default(),
+            scan_duration_seconds: Stat::default(),
+            cache_update_duration_seconds: Stat::default(),
+            total_scans: AtomicU64::new(0),
+            scan_success_count: AtomicU64::new(0),
+            scan_failure_count: AtomicU64::new(0),
+            used_subgroups: Stat::default(),
+            cache_size: Stat::default(),
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
+            http_request_timestamps: RequestTimestamps::default(),
+            request_duration_ms: Stat::default(),
+            label_cardinality: Stat::default(),
+            metrics_endpoint_calls: AtomicU64::new(0),
+            exporter_memory_mb: Stat::default(),
+            exporter_cpu_percent: Stat::default(),
+            start_time: Instant::now(),
+            last_scan_time: StdRwLock::new(None),
+        }
+    }
 }
 
 impl HealthStats {
@@ -866,6 +951,107 @@ impl HealthStats {
         self.total_scans.fetch_add(1, Ordering::Relaxed);
     }
 
+    fn record_scan_success(&self) {
+        self.scan_success_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_scan_failure(&self) {
+        self.scan_failure_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_used_subgroups(&self, count: u64) {
+        self.used_subgroups.add_sample(count as f64);
+    }
+
+    fn record_cache_size(&self, size: u64) {
+        self.cache_size.add_sample(size as f64);
+    }
+
+    fn record_cache_hit(&self) {
+        self.cache_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[allow(dead_code)]
+    fn record_cache_miss(&self) {
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_http_request(&self) {
+        self.http_request_timestamps.record();
+    }
+
+    fn record_request_duration(&self, duration_ms: f64) {
+        self.request_duration_ms.add_sample(duration_ms);
+    }
+
+    fn record_label_cardinality(&self, count: u64) {
+        self.label_cardinality.add_sample(count as f64);
+    }
+
+    fn record_metrics_endpoint_call(&self) {
+        self.metrics_endpoint_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_exporter_resources(&self, memory_mb: f64, cpu_percent: f64) {
+        self.exporter_memory_mb.add_sample(memory_mb);
+        self.exporter_cpu_percent.add_sample(cpu_percent);
+    }
+
+    fn update_last_scan_time(&self) {
+        if let Ok(mut guard) = self.last_scan_time.write() {
+            *guard = Some(Instant::now());
+        }
+    }
+
+    fn get_scan_success_rate(&self) -> f64 {
+        let success = self.scan_success_count.load(Ordering::Relaxed);
+        let failure = self.scan_failure_count.load(Ordering::Relaxed);
+        let total = success + failure;
+        if total == 0 {
+            100.0
+        } else {
+            (success as f64 / total as f64) * 100.0
+        }
+    }
+
+    fn get_cache_hit_ratio(&self) -> f64 {
+        let hits = self.cache_hits.load(Ordering::Relaxed);
+        let misses = self.cache_misses.load(Ordering::Relaxed);
+        let total = hits + misses;
+        if total == 0 {
+            100.0 // Default to 100% when no cache operations have occurred
+        } else {
+            (hits as f64 / total as f64) * 100.0
+        }
+    }
+
+    fn get_uptime_hours(&self) -> f64 {
+        self.start_time.elapsed().as_secs_f64() / 3600.0
+    }
+
+    fn get_last_scan_time_str(&self) -> String {
+        // Time constants for formatting
+        const SECS_PER_DAY: u64 = 86400;
+        const SECS_PER_HOUR: u64 = 3600;
+        const SECS_PER_MINUTE: u64 = 60;
+
+        if let Ok(guard) = self.last_scan_time.read() {
+            if let Some(last_scan) = *guard {
+                // Calculate time since epoch by using SystemTime
+                let elapsed_since_scan = last_scan.elapsed();
+                let now = SystemTime::now();
+                if let Ok(duration) = now.duration_since(SystemTime::UNIX_EPOCH) {
+                    let scan_time_secs = duration.as_secs().saturating_sub(elapsed_since_scan.as_secs());
+                    let hours = (scan_time_secs % SECS_PER_DAY) / SECS_PER_HOUR;
+                    let minutes = (scan_time_secs % SECS_PER_HOUR) / SECS_PER_MINUTE;
+                    let seconds = scan_time_secs % SECS_PER_MINUTE;
+                    return format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
+                }
+            }
+        }
+        "N/A".to_string()
+    }
+
     fn render_table(&self) -> String {
         let (sc_cur, sc_avg, sc_max, sc_min, _sc_count) = self.scanned_processes.snapshot();
         let (sd_cur, sd_avg, sd_max, sd_min, _sd_count) = self.scan_duration_seconds.snapshot();
@@ -873,15 +1059,35 @@ impl HealthStats {
             self.cache_update_duration_seconds.snapshot();
         let total = self.total_scans.load(Ordering::Relaxed);
 
+        // New metrics snapshots
+        let (ug_cur, ug_avg, ug_max, ug_min, _) = self.used_subgroups.snapshot();
+        let (cs_cur, cs_avg, cs_max, cs_min, _) = self.cache_size.snapshot();
+        let (rd_cur, rd_avg, rd_max, rd_min, _) = self.request_duration_ms.snapshot();
+        let (lc_cur, lc_avg, lc_max, lc_min, _) = self.label_cardinality.snapshot();
+        let (em_cur, em_avg, em_max, em_min, _) = self.exporter_memory_mb.snapshot();
+        let (ec_cur, ec_avg, ec_max, ec_min, _) = self.exporter_cpu_percent.snapshot();
+
+        let scan_success_rate = self.get_scan_success_rate();
+        let cache_hit_ratio = self.get_cache_hit_ratio();
+        let http_requests_last_minute = self.http_request_timestamps.count_last_minute();
+        let metrics_calls = self.metrics_endpoint_calls.load(Ordering::Relaxed);
+        let uptime_hours = self.get_uptime_hours();
+        let last_scan = self.get_last_scan_time_str();
+
         let left_col = 26usize;
         let col_w = 12usize;
 
         let mut out = String::new();
 
+        writeln!(out, "HEALTH ENDPOINT - EXPORTER INTERNAL STATS").ok();
+        writeln!(out, "==========================================").ok();
+        writeln!(out).ok();
+
+        // Header
         writeln!(
             out,
             "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
-            "metric",
+            "",
             "current",
             "average",
             "max",
@@ -891,12 +1097,15 @@ impl HealthStats {
         )
         .ok();
 
-        writeln!(out, "{}", "-".repeat(left_col + 3 + (col_w + 3) * 4)).ok();
+        // SCAN PERFORMANCE section
+        writeln!(out).ok();
+        writeln!(out, "SCAN PERFORMANCE").ok();
+        writeln!(out, "-----------------").ok();
 
         writeln!(
             out,
             "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
-            "scanned processes",
+            "scanned_processes",
             format!("{:.0}", sc_cur),
             format!("{:.1}", sc_avg),
             format!("{:.0}", sc_max),
@@ -909,7 +1118,7 @@ impl HealthStats {
         writeln!(
             out,
             "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
-            "scan duration (s)",
+            "scan_duration (s)",
             format!("{:.3}", sd_cur),
             format!("{:.3}", sd_avg),
             format!("{:.3}", sd_max),
@@ -918,6 +1127,37 @@ impl HealthStats {
             col = col_w
         )
         .ok();
+
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "scan_success_rate (%)",
+            format!("{:.1}", scan_success_rate),
+            format!("{:.1}", scan_success_rate),
+            format!("{:.1}", scan_success_rate),
+            format!("{:.1}", scan_success_rate),
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "used_subgroups",
+            format!("{:.0}", ug_cur),
+            format!("{:.1}", ug_avg),
+            format!("{:.0}", ug_max),
+            format!("{:.0}", ug_min),
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        // CACHE PERFORMANCE section
+        writeln!(out).ok();
+        writeln!(out, "CACHE PERFORMANCE").ok();
+        writeln!(out, "------------------").ok();
 
         writeln!(
             out,
@@ -932,8 +1172,128 @@ impl HealthStats {
         )
         .ok();
 
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "cache_hit_ratio (%)",
+            format!("{:.1}", cache_hit_ratio),
+            format!("{:.1}", cache_hit_ratio),
+            format!("{:.1}", cache_hit_ratio),
+            format!("{:.1}", cache_hit_ratio),
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "cache_size",
+            format!("{:.0}", cs_cur),
+            format!("{:.1}", cs_avg),
+            format!("{:.0}", cs_max),
+            format!("{:.0}", cs_min),
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        // HTTP SERVER section
         writeln!(out).ok();
-        writeln!(out, "number of done scans: {}", total).ok();
+        writeln!(out, "HTTP SERVER").ok();
+        writeln!(out, "-----------").ok();
+
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "http_requests_last_minute",
+            format!("{}", http_requests_last_minute),
+            "N/A",
+            "N/A",
+            "N/A",
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "avg_request_duration (ms)",
+            format!("{:.1}", rd_cur),
+            format!("{:.1}", rd_avg),
+            format!("{:.1}", rd_max),
+            format!("{:.1}", rd_min),
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "label_cardinality_total",
+            format!("{:.0}", lc_cur),
+            format!("{:.1}", lc_avg),
+            format!("{:.0}", lc_max),
+            format!("{:.0}", lc_min),
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "metrics_endpoint_calls",
+            format!("{}", metrics_calls),
+            "N/A",
+            "N/A",
+            "N/A",
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        // EXPORTER RESOURCES section
+        writeln!(out).ok();
+        writeln!(out, "EXPORTER RESOURCES").ok();
+        writeln!(out, "-------------------").ok();
+
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "exporter_memory_usage (MB)",
+            format!("{:.1}", em_cur),
+            format!("{:.1}", em_avg),
+            format!("{:.1}", em_max),
+            format!("{:.1}", em_min),
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        writeln!(
+            out,
+            "{:left$} | {:^col$} | {:^col$} | {:^col$} | {:^col$}",
+            "exporter_cpu_usage (%)",
+            format!("{:.1}", ec_cur),
+            format!("{:.1}", ec_avg),
+            format!("{:.1}", ec_max),
+            format!("{:.1}", ec_min),
+            left = left_col,
+            col = col_w
+        )
+        .ok();
+
+        // Summary line
+        writeln!(out).ok();
+        writeln!(
+            out,
+            "number of done scans: {} | last scan: {} | uptime: {:.1}h",
+            total, last_scan, uptime_hours
+        )
+        .ok();
 
         out
     }
@@ -2167,6 +2527,16 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
 
             // Encode metrics in Prometheus text format
             let families = state.registry.gather();
+
+            // Calculate label cardinality (total number of label pairs across all metrics)
+            let mut label_count: u64 = 0;
+            for family in &families {
+                for metric in family.get_metric() {
+                    label_count += metric.get_label().len() as u64;
+                }
+            }
+            state.health_stats.record_label_cardinality(label_count);
+
             let mut buffer = Vec::with_capacity(BUFFER_CAP);
             let encoder = TextEncoder::new();
 
@@ -2175,12 +2545,19 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
                 return Err(MetricsError::EncodingFailed);
             }
 
+            // Record metrics request statistics
+            let request_duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+            state.health_stats.record_metrics_endpoint_call();
+            state.health_stats.record_request_duration(request_duration_ms);
+            state.health_stats.record_http_request();
+            state.health_stats.record_cache_hit();
+
             debug!(
                 "Metrics request completed: {} processes (exported {}), {} bytes, {:.3}ms",
                 processes_vec.len(),
                 exported_count,
                 buffer.len(),
-                start.elapsed().as_secs_f64() * 1000.0
+                request_duration_ms
             );
 
             return String::from_utf8(buffer).map_err(|_| MetricsError::EncodingFailed);
@@ -2198,6 +2575,9 @@ async fn metrics_handler(State(state): State<SharedState>) -> Result<String, Met
 #[instrument(skip(state))]
 async fn health_handler(State(state): State<SharedState>) -> impl IntoResponse {
     debug!("Processing /health request");
+
+    // Track HTTP request for health endpoint
+    state.health_stats.record_http_request();
 
     let cache = state.cache.read().await;
 
@@ -2349,12 +2729,31 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
     // Notify all waiting handlers that cache update is complete
     state.cache_ready.notify_waiters();
 
+    // Count unique subgroups used in this scan
+    use std::collections::HashSet;
+    let mut used_subgroups_set: HashSet<(Arc<str>, Arc<str>)> = HashSet::new();
+    for p in &results {
+        let (group, subgroup) = classify_process_raw(&p.name);
+        used_subgroups_set.insert((group, subgroup));
+    }
+    let subgroups_count = used_subgroups_set.len() as u64;
+
     // Record completed scan metrics in HealthStats (call outside cache write-lock)
     let scanned = results.len() as u64;
     let scan_duration = start.elapsed().as_secs_f64();
     state
         .health_stats
         .record_scan(scanned, scan_duration, scan_duration);
+
+    // Record new health stats
+    state.health_stats.record_scan_success();
+    state.health_stats.record_used_subgroups(subgroups_count);
+    state.health_stats.record_cache_size(scanned);
+    state.health_stats.update_last_scan_time();
+
+    // Read exporter's own resource usage from /proc/self
+    let (exporter_mem_mb, exporter_cpu_pct) = read_self_resources();
+    state.health_stats.record_exporter_resources(exporter_mem_mb, exporter_cpu_pct);
 
     info!(
         "Cache update completed: {} processes (subgroup filters applied at scrape), {} total scanned, {:.2}ms",
@@ -2514,4 +2913,58 @@ fn parse_memory_for_process(
 
     let smaps = proc_path.join("smaps");
     parse_smaps(&smaps, buffers.smaps_kb)
+}
+
+/// Reads the exporter's own memory and CPU usage from /proc/self
+/// Returns (memory_mb, cpu_percent)
+fn read_self_resources() -> (f64, f64) {
+    let memory_mb = read_self_memory_mb().unwrap_or(0.0);
+    let cpu_percent = read_self_cpu_percent().unwrap_or(0.0);
+    (memory_mb, cpu_percent)
+}
+
+/// Reads the exporter's RSS memory usage from /proc/self/status
+fn read_self_memory_mb() -> Option<f64> {
+    let content = fs::read_to_string("/proc/self/status").ok()?;
+    for line in content.lines() {
+        if let Some(value) = line.strip_prefix("VmRSS:") {
+            let kb: u64 = value.split_whitespace().next()?.parse().ok()?;
+            return Some(kb as f64 / 1024.0);
+        }
+    }
+    None
+}
+
+/// Reads the exporter's CPU usage from /proc/self/stat
+/// 
+/// NOTE: This calculation provides an *average* CPU usage over the exporter's lifetime,
+/// not an instantaneous measurement. For long-running processes, this value trends toward
+/// the average load and may not reflect current CPU activity. This approach is simpler
+/// and doesn't require maintaining state for delta-based calculations, but users should
+/// be aware of this limitation when interpreting the value.
+fn read_self_cpu_percent() -> Option<f64> {
+    // CPU percent estimation from /proc/self/stat
+    // Fields 14 (utime) and 15 (stime) are in clock ticks
+    let content = fs::read_to_string("/proc/self/stat").ok()?;
+    let parts: Vec<&str> = content.split_whitespace().collect();
+    if parts.len() <= 14 {
+        return None;
+    }
+
+    let utime: f64 = parts[13].parse().ok()?;
+    let stime: f64 = parts[14].parse().ok()?;
+    let total_ticks = utime + stime;
+
+    // Get system uptime to calculate approximate CPU percentage
+    let uptime_content = fs::read_to_string("/proc/uptime").ok()?;
+    let uptime_seconds: f64 = uptime_content.split_whitespace().next()?.parse().ok()?;
+
+    if uptime_seconds > 0.0 {
+        // Calculate average CPU percentage over lifetime
+        // This is (cpu_time_seconds / uptime) * 100
+        let cpu_time_seconds = total_ticks / *CLK_TCK;
+        Some((cpu_time_seconds / uptime_seconds) * 100.0)
+    } else {
+        None
+    }
 }
