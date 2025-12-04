@@ -103,8 +103,8 @@ struct Args {
     debug: bool,
 
     /// Cache metrics for N seconds
-    #[arg(long, default_value_t = 30)]
-    cache_ttl: u64,
+    #[arg(long)]
+    cache_ttl: Option<u64>,
 
     /// Disable /health endpoint + health metrics
     #[arg(long)]
@@ -119,16 +119,16 @@ struct Args {
     disable_default_collectors: bool,
 
     /// Override IO buffer size (KB) for generic /proc readers
-    #[arg(long, default_value_t = 256)]
-    io_buffer_kb: usize,
+    #[arg(long)]
+    io_buffer_kb: Option<usize>,
 
     /// Override buffer size (KB) for /proc/<pid>/smaps
-    #[arg(long, default_value_t = 512)]
-    smaps_buffer_kb: usize,
+    #[arg(long)]
+    smaps_buffer_kb: Option<usize>,
 
     /// Override buffer size (KB) for /proc/<pid>/smaps_rollup
-    #[arg(long, default_value_t = 256)]
-    smaps_rollup_buffer_kb: usize,
+    #[arg(long)]
+    smaps_rollup_buffer_kb: Option<usize>,
 
     /// Minimum USS in KB to include process
     #[arg(long)]
@@ -1746,14 +1746,17 @@ fn resolve_config(args: &Args) -> Result<Config, Box<dyn std::error::Error>> {
     }
 
     // Performance settings
-    if args.io_buffer_kb != 256 {
-        config.io_buffer_kb = Some(args.io_buffer_kb);
+    if let Some(io_buffer_kb) = args.io_buffer_kb {
+        config.io_buffer_kb = Some(io_buffer_kb);
     }
-    if args.smaps_buffer_kb != 512 {
-        config.smaps_buffer_kb = Some(args.smaps_buffer_kb);
+    if let Some(smaps_buffer_kb) = args.smaps_buffer_kb {
+        config.smaps_buffer_kb = Some(smaps_buffer_kb);
     }
-    if args.smaps_rollup_buffer_kb != 256 {
-        config.smaps_rollup_buffer_kb = Some(args.smaps_rollup_buffer_kb);
+    if let Some(smaps_rollup_buffer_kb) = args.smaps_rollup_buffer_kb {
+        config.smaps_rollup_buffer_kb = Some(smaps_rollup_buffer_kb);
+    }
+    if let Some(cache_ttl) = args.cache_ttl {
+        config.cache_ttl = Some(cache_ttl);
     }
 
     // Top-N overrides: CLI wins if provided
@@ -2007,25 +2010,17 @@ fn setup_logging(_config: &Config, args: &Args) {
 }
 
 /// Resolve effective buffer sizes (CLI > config > defaults)
-
 fn resolve_buffer_config(cfg: &Config, args: &Args) -> BufferConfig {
-    // Precedence: CLI (if explicitly different from its derive default) >
-    //             config file > hard-coded default.
-    let io_kb = if args.io_buffer_kb != 256 {
-        args.io_buffer_kb
-    } else {
-        cfg.io_buffer_kb.unwrap_or(256)
-    };
-    let smaps_kb = if args.smaps_buffer_kb != 512 {
-        args.smaps_buffer_kb
-    } else {
-        cfg.smaps_buffer_kb.unwrap_or(512)
-    };
-    let smaps_rollup_kb = if args.smaps_rollup_buffer_kb != 256 {
-        args.smaps_rollup_buffer_kb
-    } else {
-        cfg.smaps_rollup_buffer_kb.unwrap_or(256)
-    };
+    // Precedence: CLI (if provided) > config file > hard-coded default.
+    let io_kb = args
+        .io_buffer_kb
+        .unwrap_or_else(|| cfg.io_buffer_kb.unwrap_or(256));
+    let smaps_kb = args
+        .smaps_buffer_kb
+        .unwrap_or_else(|| cfg.smaps_buffer_kb.unwrap_or(512));
+    let smaps_rollup_kb = args
+        .smaps_rollup_buffer_kb
+        .unwrap_or_else(|| cfg.smaps_rollup_buffer_kb.unwrap_or(256));
 
     BufferConfig {
         io_kb,
