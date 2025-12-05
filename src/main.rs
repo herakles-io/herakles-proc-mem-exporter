@@ -1958,10 +1958,9 @@ fn generate_random_process(
 /// -------------------------------------------------------------------
 /// CONFIGURATION MANAGEMENT
 /// -------------------------------------------------------------------
-
-/// Resolves configuration from CLI args, config file, and defaults
-// Replace the existing resolve_config() override logic for port with this:
-// This enforces precedence: CLI (if provided) > config file > default.
+/// Resolves configuration from CLI args, config file, and defaults.
+/// This enforces precedence: CLI (if provided) > config file > default.
+/// (Note: Remove decorative lines or reposition them inside the function if needed.)
 fn resolve_config(args: &Args) -> Result<Config, Box<dyn std::error::Error>> {
     let mut config = if args.no_config {
         Config::default()
