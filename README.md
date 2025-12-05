@@ -177,6 +177,79 @@ herakles-proc-mem-exporter config --format yaml --commented -o config.yaml
 herakles-proc-mem-exporter config --format json -o config.json
 ```
 
+## 🔒 SSL/TLS Configuration
+
+The exporter supports HTTPS through TLS/SSL configuration.
+
+### Enable TLS via Configuration File
+
+```yaml
+# /etc/herakles/config.yaml
+port: 9215
+bind: "0.0.0.0"
+
+# TLS/SSL Configuration
+enable_tls: true
+tls_cert_path: "/etc/herakles/certs/server.crt"
+tls_key_path: "/etc/herakles/certs/server.key"
+```
+
+### Enable TLS via CLI
+
+```bash
+herakles-proc-mem-exporter \
+  --enable-tls \
+  --tls-cert /path/to/server.crt \
+  --tls-key /path/to/server.key
+```
+
+### Generate Self-Signed Certificate (Testing Only)
+
+```bash
+# Generate self-signed certificate
+openssl req -x509 -newkey rsa:4096 -nodes \
+  -keyout server.key -out server.crt \
+  -days 365 -subj "/CN=localhost"
+
+# Start exporter with TLS
+herakles-proc-mem-exporter \
+  --enable-tls \
+  --tls-cert server.crt \
+  --tls-key server.key
+```
+
+### Docker with TLS
+
+```bash
+docker run -d \
+  --name herakles-exporter \
+  -p 9215:9215 \
+  -v /proc:/host/proc:ro \
+  -v /path/to/certs:/certs:ro \
+  herakles-proc-mem-exporter \
+  --enable-tls \
+  --tls-cert /certs/server.crt \
+  --tls-key /certs/server.key
+```
+
+### Prometheus Configuration with HTTPS
+
+```yaml
+scrape_configs:
+  - job_name: 'herakles-proc-mem'
+    static_configs:
+      - targets: ['localhost:9215']
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    scheme: https
+    tls_config:
+      # For self-signed certs (testing only):
+      # insecure_skip_verify: true
+      
+      # For private/custom CA certificates:
+      ca_file: /path/to/ca.crt
+```
+
 ## 🏷️ Subgroups System
 
 The exporter automatically classifies processes into groups and subgroups for better organization and analysis.
@@ -397,6 +470,9 @@ Options:
       --top-n-subgroup <N>           Top-N processes per subgroup
       --top-n-others <N>             Top-N processes for "other" group
   -t, --test-data-file <FILE>        Path to JSON test data file
+      --enable-tls                   Enable HTTPS/TLS
+      --tls-cert <FILE>              Path to TLS certificate (PEM)
+      --tls-key <FILE>               Path to TLS private key (PEM)
   -h, --help                         Print help
   -V, --version                      Print version
 ```

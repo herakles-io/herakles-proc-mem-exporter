@@ -160,6 +160,57 @@ enable_default_collectors: true
 enable_pprof: false        # Enable for debugging only
 ```
 
+### TLS/SSL Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable_tls` | boolean | `false` | Enable HTTPS/TLS |
+| `tls_cert_path` | string | `null` | Path to TLS certificate (PEM format) |
+| `tls_key_path` | string | `null` | Path to TLS private key (PEM format) |
+
+```yaml
+# Enable TLS for secure connections
+enable_tls: true
+tls_cert_path: "/etc/herakles/certs/server.crt"
+tls_key_path: "/etc/herakles/certs/server.key"
+```
+
+**TLS CLI Options:**
+
+```bash
+herakles-proc-mem-exporter \
+  --enable-tls \
+  --tls-cert /path/to/server.crt \
+  --tls-key /path/to/server.key
+```
+
+**Generate Self-Signed Certificate (Testing Only):**
+
+```bash
+openssl req -x509 -newkey rsa:4096 -nodes \
+  -keyout server.key -out server.crt \
+  -days 365 -subj "/CN=localhost"
+```
+
+**Production TLS Setup:**
+
+For production environments, use certificates from a trusted Certificate Authority (CA):
+
+1. **Obtain certificates** from your CA or use Let's Encrypt
+2. **Store certificates** securely with appropriate permissions:
+   ```bash
+   sudo mkdir -p /etc/herakles/certs
+   sudo chmod 700 /etc/herakles/certs
+   sudo cp server.crt server.key /etc/herakles/certs/
+   sudo chmod 600 /etc/herakles/certs/server.key
+   ```
+3. **Configure the exporter**:
+   ```yaml
+   enable_tls: true
+   tls_cert_path: "/etc/herakles/certs/server.crt"
+   tls_key_path: "/etc/herakles/certs/server.key"
+   ```
+
 ### Logging
 
 | Option | Type | Default | Description |
