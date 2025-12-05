@@ -30,13 +30,15 @@ scrape_configs:
     scrape_timeout: 30s
     scheme: https
     tls_config:
-      # For production with trusted CA certificates
+      # For private/custom CA certificates (not publicly trusted)
       ca_file: /etc/prometheus/certs/ca.crt
       
       # Optional: Client certificate authentication
       # cert_file: /etc/prometheus/certs/client.crt
       # key_file: /etc/prometheus/certs/client.key
 ```
+
+**Note:** For certificates signed by publicly trusted CAs, no additional `tls_config` is needed - just set `scheme: https`.
 
 **For Self-Signed Certificates (Testing Only):**
 

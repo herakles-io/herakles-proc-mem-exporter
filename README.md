@@ -243,7 +243,10 @@ scrape_configs:
     scrape_timeout: 30s
     scheme: https
     tls_config:
-      insecure_skip_verify: false  # Set to true for self-signed certs
+      # For self-signed certs (testing only):
+      # insecure_skip_verify: true
+      
+      # For private/custom CA certificates:
       ca_file: /path/to/ca.crt
 ```
 
