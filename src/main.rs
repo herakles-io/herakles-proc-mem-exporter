@@ -3603,9 +3603,9 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
 
     // Update buffer usage in health state with actual maximum bytes read
     // Convert bytes to KB (round up to nearest KB to avoid showing 0)
-    let io_usage_kb = (MAX_IO_BUFFER_BYTES.load(Ordering::Relaxed) + 1023) / 1024;
-    let smaps_usage_kb = (MAX_SMAPS_BUFFER_BYTES.load(Ordering::Relaxed) + 1023) / 1024;
-    let smaps_rollup_usage_kb = (MAX_SMAPS_ROLLUP_BUFFER_BYTES.load(Ordering::Relaxed) + 1023) / 1024;
+    let io_usage_kb = MAX_IO_BUFFER_BYTES.load(Ordering::Relaxed).div_ceil(1024);
+    let smaps_usage_kb = MAX_SMAPS_BUFFER_BYTES.load(Ordering::Relaxed).div_ceil(1024);
+    let smaps_rollup_usage_kb = MAX_SMAPS_ROLLUP_BUFFER_BYTES.load(Ordering::Relaxed).div_ceil(1024);
 
     state
         .health_state
