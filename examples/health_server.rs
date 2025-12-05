@@ -38,7 +38,8 @@ async fn health_handler(data: web::Data<AppState>) -> impl Responder {
 #[cfg(feature = "health-actix")]
 #[get("/")]
 async fn index() -> impl Responder {
-    HttpResponse::Ok().body("Health Server Example\n\nEndpoints:\n  GET /health - Buffer health status")
+    HttpResponse::Ok()
+        .body("Health Server Example\n\nEndpoints:\n  GET /health - Buffer health status")
 }
 
 #[cfg(feature = "health-actix")]

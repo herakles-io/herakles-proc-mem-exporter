@@ -88,7 +88,8 @@ impl HealthState {
 
     /// Updates the current smaps_rollup buffer usage in kilobytes.
     pub fn update_smaps_rollup_buffer_kb(&self, value_kb: usize) {
-        self.smaps_rollup_buffer_kb.store(value_kb, Ordering::Relaxed);
+        self.smaps_rollup_buffer_kb
+            .store(value_kb, Ordering::Relaxed);
     }
 
     /// Gets the current IO buffer usage in kilobytes.
