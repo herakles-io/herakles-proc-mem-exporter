@@ -2918,7 +2918,7 @@ fn render_buffer_health(health: &HealthResponse) -> String {
         "Buffer", "Usage (KB)", "Capacity (KB)", "Status"
     )
     .ok();
-    writeln!(out, "{}", "-".repeat(70)).ok();
+    writeln!(out, "{}", "-".repeat(66)).ok();
 
     for buffer in &health.buffers {
         writeln!(
