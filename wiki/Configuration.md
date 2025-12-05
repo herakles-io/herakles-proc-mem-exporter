@@ -180,8 +180,8 @@ tls_key_path: "/etc/herakles/certs/server.key"
 ```bash
 herakles-proc-mem-exporter \
   --enable-tls \
-  --tls-cert /path/to/cert.pem \
-  --tls-key /path/to/key.pem
+  --tls-cert /path/to/server.crt \
+  --tls-key /path/to/server.key
 ```
 
 **Generate Self-Signed Certificate (Testing Only):**
