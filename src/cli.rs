@@ -143,6 +143,18 @@ pub struct Args {
     /// Path to JSON test data file (uses synthetic data instead of /proc)
     #[arg(short = 't', long)]
     pub test_data_file: Option<PathBuf>,
+
+    /// Enable TLS/SSL for HTTPS
+    #[arg(long)]
+    pub enable_tls: bool,
+
+    /// Path to TLS certificate file (PEM format)
+    #[arg(long)]
+    pub tls_cert: Option<PathBuf>,
+
+    /// Path to TLS private key file (PEM format)
+    #[arg(long)]
+    pub tls_key: Option<PathBuf>,
 }
 
 /// Subcommands for additional functionality

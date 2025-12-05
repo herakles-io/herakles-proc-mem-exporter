@@ -47,6 +47,10 @@ chrono = { version = "0.4", features = ["serde"] }
 # Optional: actix-web for health server example
 actix-web = { version = "4", optional = true }
 
+# TLS support
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tokio-rustls = "0.26"
+
 [build-dependencies]
 vergen = { version = "8.0", features = ["build", "git", "gitcl"] }
 

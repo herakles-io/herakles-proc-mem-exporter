@@ -15,6 +15,7 @@ mod state;
 
 use ahash::AHashMap as HashMap;
 use axum::{routing::get, Router};
+use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
 use herakles_proc_mem_exporter::{AppConfig as HealthAppConfig, BufferHealthConfig, HealthState};
 use prometheus::{Gauge, Registry};
@@ -597,23 +598,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = app.with_state(state.clone());
 
-    let listener = TcpListener::bind(addr).await?;
-    info!(
-        "herakles-proc-mem-exporter listening on http://{}:{}",
-        bind_ip_str, port
-    );
+    // Check if TLS is enabled
+    let enable_tls = config.enable_tls.unwrap_or(false);
 
-    let server = axum::serve(listener, app);
+    if enable_tls {
+        // TLS is enabled - use axum_server with rustls
+        let cert_path = config.tls_cert_path.as_ref().expect("TLS cert path validated");
+        let key_path = config.tls_key_path.as_ref().expect("TLS key path validated");
 
-    tokio::select! {
-        result = server => {
-            if let Err(e) = result {
-                error!("Server error: {}", e);
-                return Err(e.into());
+        info!("Loading TLS certificate from: {}", cert_path);
+        info!("Loading TLS private key from: {}", key_path);
+
+        let tls_config = RustlsConfig::from_pem_file(cert_path, key_path)
+            .await
+            .map_err(|e| {
+                error!("Failed to load TLS configuration: {}", e);
+                e
+            })?;
+
+        info!(
+            "herakles-proc-mem-exporter listening on https://{}:{}",
+            bind_ip_str, port
+        );
+
+        let server = axum_server::bind_rustls(addr, tls_config).serve(app.into_make_service());
+
+        tokio::select! {
+            result = server => {
+                if let Err(e) = result {
+                    error!("Server error: {}", e);
+                    return Err(e.into());
+                }
+            }
+            _ = shutdown_signal => {
+                info!("Shutdown signal received, exiting...");
             }
         }
-        _ = shutdown_signal => {
-            info!("Shutdown signal received, exiting...");
+    } else {
+        // TLS is disabled - use standard TCP listener
+        let listener = TcpListener::bind(addr).await?;
+        info!(
+            "herakles-proc-mem-exporter listening on http://{}:{}",
+            bind_ip_str, port
+        );
+
+        let server = axum::serve(listener, app);
+
+        tokio::select! {
+            result = server => {
+                if let Err(e) = result {
+                    error!("Server error: {}", e);
+                    return Err(e.into());
+                }
+            }
+            _ = shutdown_signal => {
+                info!("Shutdown signal received, exiting...");
+            }
         }
     }
 

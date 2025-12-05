@@ -49,6 +49,28 @@ pub async fn config_handler(State(state): State<SharedState>) -> impl IntoRespon
     .ok();
     writeln!(out).ok();
 
+    writeln!(out, "TLS/SSL CONFIGURATION").ok();
+    writeln!(out, "---------------------").ok();
+    writeln!(
+        out,
+        "enable_tls:                 {}",
+        cfg.enable_tls.unwrap_or(false)
+    )
+    .ok();
+    writeln!(
+        out,
+        "tls_cert_path:              {}",
+        cfg.tls_cert_path.as_deref().unwrap_or("none")
+    )
+    .ok();
+    writeln!(
+        out,
+        "tls_key_path:               {}",
+        cfg.tls_key_path.as_deref().unwrap_or("none")
+    )
+    .ok();
+    writeln!(out).ok();
+
     writeln!(out, "METRICS COLLECTION").ok();
     writeln!(out, "------------------").ok();
     writeln!(
