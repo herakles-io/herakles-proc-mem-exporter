@@ -39,7 +39,7 @@ pub struct MemoryMetrics {
 impl MemoryMetrics {
     /// Creates and registers all Prometheus metrics with the registry.
     pub fn new(registry: &Registry) -> Result<Self, Box<dyn std::error::Error>> {
-        let labels = &["pid", "name", "group", "subgroup"];
+        let labels = &["pid", "name", "group", "subgroup", "uptime_in_seconds"];
 
         let rss = GaugeVec::new(
             Opts::new(
@@ -83,63 +83,63 @@ impl MemoryMetrics {
                 "herakles_proc_mem_group_rss_bytes_sum",
                 "Sum of RSS bytes per subgroup",
             ),
-            &["group", "subgroup"],
+            &["group", "subgroup", "uptime_in_seconds"],
         )?;
         let agg_pss_sum = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_group_pss_bytes_sum",
                 "Sum of PSS bytes per subgroup",
             ),
-            &["group", "subgroup"],
+            &["group", "subgroup", "uptime_in_seconds"],
         )?;
         let agg_uss_sum = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_group_uss_bytes_sum",
                 "Sum of USS bytes per subgroup",
             ),
-            &["group", "subgroup"],
+            &["group", "subgroup", "uptime_in_seconds"],
         )?;
         let agg_cpu_percent_sum = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_group_cpu_percent_sum",
                 "Sum of CPU percent per subgroup",
             ),
-            &["group", "subgroup"],
+            &["group", "subgroup", "uptime_in_seconds"],
         )?;
         let agg_cpu_time_sum = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_group_cpu_time_seconds_sum",
                 "Sum of CPU time seconds per subgroup",
             ),
-            &["group", "subgroup"],
+            &["group", "subgroup", "uptime_in_seconds"],
         )?;
 
         // Top-N metrics per subgroup
         let top_rss = GaugeVec::new(
             Opts::new("herakles_proc_mem_top_rss_bytes", "Top-N RSS per subgroup"),
-            &["group", "subgroup", "rank", "pid", "name"],
+            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
         )?;
         let top_pss = GaugeVec::new(
             Opts::new("herakles_proc_mem_top_pss_bytes", "Top-N PSS per subgroup"),
-            &["group", "subgroup", "rank", "pid", "name"],
+            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
         )?;
         let top_uss = GaugeVec::new(
             Opts::new("herakles_proc_mem_top_uss_bytes", "Top-N USS per subgroup"),
-            &["group", "subgroup", "rank", "pid", "name"],
+            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
         )?;
         let top_cpu_percent = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_cpu_percent",
                 "Top-N CPU percent per subgroup",
             ),
-            &["group", "subgroup", "rank", "pid", "name"],
+            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
         )?;
         let top_cpu_time = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_cpu_time_seconds",
                 "Top-N CPU time seconds per subgroup",
             ),
-            &["group", "subgroup", "rank", "pid", "name"],
+            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
         )?;
 
         // Percentage-of-subgroup metrics
@@ -148,28 +148,28 @@ impl MemoryMetrics {
                 "herakles_proc_mem_top_cpu_percent_of_subgroup",
                 "Top-N CPU time as percentage of subgroup total CPU time",
             ),
-            &["group", "subgroup", "rank", "pid", "name"],
+            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
         )?;
         let top_rss_percent_of_subgroup = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_rss_percent_of_subgroup",
                 "Top-N RSS as percentage of subgroup total RSS",
             ),
-            &["group", "subgroup", "rank", "pid", "name"],
+            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
         )?;
         let top_pss_percent_of_subgroup = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_pss_percent_of_subgroup",
                 "Top-N PSS as percentage of subgroup total PSS",
             ),
-            &["group", "subgroup", "rank", "pid", "name"],
+            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
         )?;
         let top_uss_percent_of_subgroup = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_uss_percent_of_subgroup",
                 "Top-N USS as percentage of subgroup total USS",
             ),
-            &["group", "subgroup", "rank", "pid", "name"],
+            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
         )?;
 
         registry.register(Box::new(rss.clone()))?;
@@ -258,8 +258,9 @@ impl MemoryMetrics {
         cpu_percent: f64,
         cpu_time_seconds: f64,
         cfg: &Config,
+        uptime_in_seconds: &str,
     ) {
-        let labels = &[pid, name, group, subgroup];
+        let labels = &[pid, name, group, subgroup, uptime_in_seconds];
 
         let enable_rss = cfg.enable_rss.unwrap_or(true);
         let enable_pss = cfg.enable_pss.unwrap_or(true);
