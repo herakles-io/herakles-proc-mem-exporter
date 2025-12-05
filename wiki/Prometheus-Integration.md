@@ -17,6 +17,63 @@ scrape_configs:
     scrape_timeout: 30s
 ```
 
+### HTTPS/TLS Configuration
+
+When TLS is enabled on the exporter, configure Prometheus to scrape via HTTPS:
+
+```yaml
+scrape_configs:
+  - job_name: 'herakles-proc-mem'
+    static_configs:
+      - targets: ['localhost:9215']
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    scheme: https
+    tls_config:
+      # For production with trusted CA certificates
+      ca_file: /etc/prometheus/certs/ca.crt
+      
+      # Optional: Client certificate authentication
+      # cert_file: /etc/prometheus/certs/client.crt
+      # key_file: /etc/prometheus/certs/client.key
+```
+
+**For Self-Signed Certificates (Testing Only):**
+
+```yaml
+scrape_configs:
+  - job_name: 'herakles-proc-mem'
+    static_configs:
+      - targets: ['localhost:9215']
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true  # Only for testing!
+```
+
+**For Production with Multiple TLS Targets:**
+
+```yaml
+scrape_configs:
+  - job_name: 'herakles-proc-mem'
+    static_configs:
+      - targets:
+          - 'server1:9215'
+          - 'server2:9215'
+          - 'server3:9215'
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    scheme: https
+    tls_config:
+      ca_file: /etc/prometheus/certs/herakles-ca.crt
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.+):.*'
+        replacement: '${1}'
+```
+
 ### Multiple Targets
 
 ```yaml
