@@ -4,10 +4,10 @@
 //! including scan performance, cache statistics, and HTTP request metrics.
 
 use std::collections::VecDeque;
+use std::fmt::Write as FmtWrite;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock as StdRwLock};
 use std::time::{Instant, SystemTime};
-use std::fmt::Write as FmtWrite;
 
 /// Running statistics for a single metric.
 #[derive(Clone, Copy, Default)]

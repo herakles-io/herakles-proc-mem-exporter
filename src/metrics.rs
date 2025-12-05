@@ -117,29 +117,64 @@ impl MemoryMetrics {
         // Top-N metrics per subgroup
         let top_rss = GaugeVec::new(
             Opts::new("herakles_proc_mem_top_rss_bytes", "Top-N RSS per subgroup"),
-            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
+            &[
+                "group",
+                "subgroup",
+                "rank",
+                "pid",
+                "name",
+                "uptime_in_seconds",
+            ],
         )?;
         let top_pss = GaugeVec::new(
             Opts::new("herakles_proc_mem_top_pss_bytes", "Top-N PSS per subgroup"),
-            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
+            &[
+                "group",
+                "subgroup",
+                "rank",
+                "pid",
+                "name",
+                "uptime_in_seconds",
+            ],
         )?;
         let top_uss = GaugeVec::new(
             Opts::new("herakles_proc_mem_top_uss_bytes", "Top-N USS per subgroup"),
-            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
+            &[
+                "group",
+                "subgroup",
+                "rank",
+                "pid",
+                "name",
+                "uptime_in_seconds",
+            ],
         )?;
         let top_cpu_percent = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_cpu_percent",
                 "Top-N CPU percent per subgroup",
             ),
-            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
+            &[
+                "group",
+                "subgroup",
+                "rank",
+                "pid",
+                "name",
+                "uptime_in_seconds",
+            ],
         )?;
         let top_cpu_time = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_cpu_time_seconds",
                 "Top-N CPU time seconds per subgroup",
             ),
-            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
+            &[
+                "group",
+                "subgroup",
+                "rank",
+                "pid",
+                "name",
+                "uptime_in_seconds",
+            ],
         )?;
 
         // Percentage-of-subgroup metrics
@@ -148,28 +183,56 @@ impl MemoryMetrics {
                 "herakles_proc_mem_top_cpu_percent_of_subgroup",
                 "Top-N CPU time as percentage of subgroup total CPU time",
             ),
-            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
+            &[
+                "group",
+                "subgroup",
+                "rank",
+                "pid",
+                "name",
+                "uptime_in_seconds",
+            ],
         )?;
         let top_rss_percent_of_subgroup = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_rss_percent_of_subgroup",
                 "Top-N RSS as percentage of subgroup total RSS",
             ),
-            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
+            &[
+                "group",
+                "subgroup",
+                "rank",
+                "pid",
+                "name",
+                "uptime_in_seconds",
+            ],
         )?;
         let top_pss_percent_of_subgroup = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_pss_percent_of_subgroup",
                 "Top-N PSS as percentage of subgroup total PSS",
             ),
-            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
+            &[
+                "group",
+                "subgroup",
+                "rank",
+                "pid",
+                "name",
+                "uptime_in_seconds",
+            ],
         )?;
         let top_uss_percent_of_subgroup = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_top_uss_percent_of_subgroup",
                 "Top-N USS as percentage of subgroup total USS",
             ),
-            &["group", "subgroup", "rank", "pid", "name", "uptime_in_seconds"],
+            &[
+                "group",
+                "subgroup",
+                "rank",
+                "pid",
+                "name",
+                "uptime_in_seconds",
+            ],
         )?;
 
         registry.register(Box::new(rss.clone()))?;
