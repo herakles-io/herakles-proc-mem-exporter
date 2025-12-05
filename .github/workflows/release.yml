@@ -111,18 +111,19 @@ jobs:
         uses: actions/download-artifact@v4.1.8
         with:
           name: herakles-proc-mem-exporter-amd64-musl
-          path: docker-build/linux/amd64
+          path: .
 
       - name: Download arm64 binary
         uses: actions/download-artifact@v4.1.8
         with:
           name: herakles-proc-mem-exporter-arm64-musl
-          path: docker-build/linux/arm64
+          path: .
 
       - name: Prepare binaries
         run: |
-          mv docker-build/linux/amd64/herakles-proc-mem-exporter-amd64-musl docker-build/linux/amd64/herakles-proc-mem-exporter
-          mv docker-build/linux/arm64/herakles-proc-mem-exporter-arm64-musl docker-build/linux/arm64/herakles-proc-mem-exporter
+          mkdir -p docker-build/linux/amd64 docker-build/linux/arm64
+          mv herakles-proc-mem-exporter-amd64-musl docker-build/linux/amd64/herakles-proc-mem-exporter
+          mv herakles-proc-mem-exporter-arm64-musl docker-build/linux/arm64/herakles-proc-mem-exporter
           chmod +x docker-build/linux/amd64/herakles-proc-mem-exporter
           chmod +x docker-build/linux/arm64/herakles-proc-mem-exporter
 
