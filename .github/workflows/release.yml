@@ -83,7 +83,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.8
         with:
           path: artifacts
 
@@ -108,13 +108,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download amd64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.8
         with:
           name: herakles-proc-mem-exporter-amd64-musl
           path: docker-build/linux/amd64
 
       - name: Download arm64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.8
         with:
           name: herakles-proc-mem-exporter-arm64-musl
           path: docker-build/linux/arm64
