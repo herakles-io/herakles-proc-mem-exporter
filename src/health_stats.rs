@@ -261,6 +261,10 @@ impl HealthStats {
         self.start_time.elapsed().as_secs_f64() / 3600.0
     }
 
+    pub fn get_uptime_seconds(&self) -> u64 {
+        self.start_time.elapsed().as_secs()
+    }
+
     pub fn get_last_scan_time_str(&self) -> String {
         // Time constants for formatting
         const SECS_PER_DAY: u64 = 86400;

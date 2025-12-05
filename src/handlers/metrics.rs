@@ -62,6 +62,9 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
             // Reset metrics before populating with fresh data
             state.metrics.reset();
 
+            // Get uptime for this scrape cycle (constant for all metrics)
+            let uptime_seconds = state.health_stats.get_uptime_seconds().to_string();
+
             let cfg = &state.config;
             let enable_rss = cfg.enable_rss.unwrap_or(true);
             let enable_pss = cfg.enable_pss.unwrap_or(true);
@@ -103,6 +106,7 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         p.cpu_percent as f64,
                         p.cpu_time_seconds as f64,
                         &state.config,
+                        &uptime_seconds,
                     );
 
                     groups.entry((group, subgroup)).or_default().push(p);
@@ -136,33 +140,33 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                     state
                         .metrics
                         .agg_rss_sum
-                        .with_label_values(&[group_ref, subgroup_ref])
+                        .with_label_values(&[group_ref, subgroup_ref, &uptime_seconds])
                         .set(rss_sum as f64);
                 }
                 if enable_pss {
                     state
                         .metrics
                         .agg_pss_sum
-                        .with_label_values(&[group_ref, subgroup_ref])
+                        .with_label_values(&[group_ref, subgroup_ref, &uptime_seconds])
                         .set(pss_sum as f64);
                 }
                 if enable_uss {
                     state
                         .metrics
                         .agg_uss_sum
-                        .with_label_values(&[group_ref, subgroup_ref])
+                        .with_label_values(&[group_ref, subgroup_ref, &uptime_seconds])
                         .set(uss_sum as f64);
                 }
                 if enable_cpu {
                     state
                         .metrics
                         .agg_cpu_percent_sum
-                        .with_label_values(&[group_ref, subgroup_ref])
+                        .with_label_values(&[group_ref, subgroup_ref, &uptime_seconds])
                         .set(cpu_percent_sum);
                     state
                         .metrics
                         .agg_cpu_time_sum
-                        .with_label_values(&[group_ref, subgroup_ref])
+                        .with_label_values(&[group_ref, subgroup_ref, &uptime_seconds])
                         .set(cpu_time_sum);
                 }
 
@@ -197,33 +201,33 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_rss
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
                             .set(p.rss as f64);
                     }
                     if enable_pss {
                         state
                             .metrics
                             .top_pss
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
                             .set(p.pss as f64);
                     }
                     if enable_uss {
                         state
                             .metrics
                             .top_uss
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
                             .set(p.uss as f64);
                     }
                     if enable_cpu {
                         state
                             .metrics
                             .top_cpu_percent
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
                             .set(p.cpu_percent as f64);
                         state
                             .metrics
                             .top_cpu_time
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
                             .set(p.cpu_time_seconds as f64);
                     }
 
@@ -233,7 +237,7 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_cpu_percent_of_subgroup
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
                             .set(pct);
                     }
 
@@ -242,7 +246,7 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_rss_percent_of_subgroup
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
                             .set(pct);
                     }
 
@@ -251,7 +255,7 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_pss_percent_of_subgroup
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
                             .set(pct);
                     }
 
@@ -260,7 +264,7 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_uss_percent_of_subgroup
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s])
+                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
                             .set(pct);
                     }
                 }
