@@ -15,7 +15,6 @@ pub static MAX_SMAPS_BUFFER_BYTES: AtomicU64 = AtomicU64::new(0);
 pub static MAX_SMAPS_ROLLUP_BUFFER_BYTES: AtomicU64 = AtomicU64::new(0);
 
 /// Buffer configuration for parsing operations.
-#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct BufferConfig {
     pub io_kb: usize,

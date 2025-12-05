@@ -12,15 +12,14 @@ use crate::process::{
 };
 
 /// Process memory metrics for test output.
-#[allow(dead_code)]
 struct TestProcMem {
-    pid: u32,
-    name: String,
+    _pid: u32,
+    _name: String,
     rss: u64,
     pss: u64,
     uss: u64,
-    cpu_percent: f32,
-    cpu_time_seconds: f32,
+    _cpu_percent: f32,
+    _cpu_time_seconds: f32,
 }
 
 /// Tests metrics collection.
@@ -59,13 +58,13 @@ pub fn command_test(
                         };
 
                         results.push(TestProcMem {
-                            pid: entry.pid,
-                            name: name.clone(),
+                            _pid: entry.pid,
+                            _name: name.clone(),
                             rss,
                             pss,
                             uss,
-                            cpu_percent: cpu.cpu_percent as f32,
-                            cpu_time_seconds: cpu.cpu_time_seconds as f32,
+                            _cpu_percent: cpu.cpu_percent as f32,
+                            _cpu_time_seconds: cpu.cpu_time_seconds as f32,
                         });
 
                         if verbose {

@@ -202,6 +202,7 @@ impl HealthStats {
         self.cache_hits.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Records a cache miss. Currently unused but kept for API completeness.
     #[allow(dead_code)]
     pub fn record_cache_miss(&self) {
         self.cache_misses.fetch_add(1, Ordering::Relaxed);
