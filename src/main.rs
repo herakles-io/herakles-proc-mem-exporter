@@ -3604,12 +3604,14 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
     // Update buffer usage in health state with actual maximum bytes read
     // Convert bytes to KB (round up to nearest KB to avoid showing 0)
     let io_usage_kb = MAX_IO_BUFFER_BYTES.load(Ordering::Relaxed).div_ceil(1024);
-    let smaps_usage_kb = MAX_SMAPS_BUFFER_BYTES.load(Ordering::Relaxed).div_ceil(1024);
-    let smaps_rollup_usage_kb = MAX_SMAPS_ROLLUP_BUFFER_BYTES.load(Ordering::Relaxed).div_ceil(1024);
+    let smaps_usage_kb = MAX_SMAPS_BUFFER_BYTES
+        .load(Ordering::Relaxed)
+        .div_ceil(1024);
+    let smaps_rollup_usage_kb = MAX_SMAPS_ROLLUP_BUFFER_BYTES
+        .load(Ordering::Relaxed)
+        .div_ceil(1024);
 
-    state
-        .health_state
-        .update_io_buffer_kb(io_usage_kb as usize);
+    state.health_state.update_io_buffer_kb(io_usage_kb as usize);
     state
         .health_state
         .update_smaps_buffer_kb(smaps_usage_kb as usize);
@@ -3848,5 +3850,181 @@ fn read_self_cpu_percent() -> Option<f64> {
         Some((cpu_time_seconds / uptime_seconds) * 100.0)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    // -------------------------------------------------------------------------
+    // Tests for parse_kb_value
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_kb_value() {
+        // Standard smaps format with trailing "kB"
+        assert_eq!(parse_kb_value("       1234 kB"), Some(1234));
+        assert_eq!(parse_kb_value("1234 kB"), Some(1234));
+        assert_eq!(parse_kb_value("0 kB"), Some(0));
+        assert_eq!(parse_kb_value("999999999 kB"), Some(999999999));
+
+        // Just numeric values (whitespace trimmed)
+        assert_eq!(parse_kb_value("  42  "), Some(42));
+        assert_eq!(parse_kb_value("100"), Some(100));
+
+        // Large values
+        assert_eq!(parse_kb_value("18446744073709551615"), Some(u64::MAX));
+    }
+
+    #[test]
+    fn test_parse_kb_value_invalid() {
+        // Empty input
+        assert_eq!(parse_kb_value(""), None);
+
+        // Only whitespace
+        assert_eq!(parse_kb_value("   "), None);
+
+        // Non-numeric input
+        assert_eq!(parse_kb_value("abc"), None);
+        assert_eq!(parse_kb_value("kB"), None);
+
+        // Negative values (can't parse as u64)
+        assert_eq!(parse_kb_value("-1 kB"), None);
+
+        // Floating point values
+        assert_eq!(parse_kb_value("1.5 kB"), None);
+
+        // Mixed invalid formats
+        assert_eq!(parse_kb_value("12abc34 kB"), None);
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for parse_cpu_time_seconds
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_cpu_time_seconds() {
+        // Create a temporary directory to simulate /proc/<pid>/stat
+        let dir = tempdir().expect("Failed to create temp dir");
+        let stat_path = dir.path().join("stat");
+
+        // Typical /proc/<pid>/stat format:
+        // pid (comm) state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt cmajflt utime stime ...
+        // Fields 14 and 15 (0-indexed: 13 and 14) are utime and stime in clock ticks
+        // With CLK_TCK typically 100, ticks / 100 = seconds
+
+        // Example: utime=1000, stime=500 -> total = 1500 ticks
+        // If CLK_TCK is 100, then CPU time = 15.0 seconds
+        let stat_content = "1234 (test_process) S 1 1234 1234 0 -1 4194304 100 0 0 0 1000 500 0 0 20 0 1 0 12345 12345678 1234 18446744073709551615 4194304 4238788 140736466511168 0 0 0 0 0 0 0 0 0 17 1 0 0 0 0 0";
+        std::fs::write(&stat_path, stat_content).expect("Failed to write stat file");
+
+        let result = parse_cpu_time_seconds(dir.path());
+        assert!(result.is_ok());
+
+        // Calculate expected value: (1000 + 500) / CLK_TCK
+        let expected = 1500.0 / *CLK_TCK;
+        let actual = result.unwrap();
+        assert!(
+            (actual - expected).abs() < 0.001,
+            "Expected ~{:.3}, got {:.3}",
+            expected,
+            actual
+        );
+    }
+
+    #[test]
+    fn test_parse_cpu_time_seconds_invalid_stat() {
+        let dir = tempdir().expect("Failed to create temp dir");
+        let stat_path = dir.path().join("stat");
+
+        // Invalid stat file with not enough fields
+        std::fs::write(&stat_path, "1234 (test) S 1 2 3").expect("Failed to write stat file");
+
+        let result = parse_cpu_time_seconds(dir.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_cpu_time_seconds_missing_file() {
+        let dir = tempdir().expect("Failed to create temp dir");
+
+        // No stat file exists
+        let result = parse_cpu_time_seconds(dir.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_cpu_time_seconds_zero_values() {
+        let dir = tempdir().expect("Failed to create temp dir");
+        let stat_path = dir.path().join("stat");
+
+        // utime=0, stime=0
+        let stat_content = "1234 (idle_process) S 1 1234 1234 0 -1 4194304 0 0 0 0 0 0 0 0 20 0 1 0 12345 12345678 1234 18446744073709551615 4194304 4238788 140736466511168 0 0 0 0 0 0 0 0 0 17 1 0 0 0 0 0";
+        std::fs::write(&stat_path, stat_content).expect("Failed to write stat file");
+
+        let result = parse_cpu_time_seconds(dir.path());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0.0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for should_include_process
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_should_include_process_no_filters() {
+        let cfg = Config::default();
+        assert!(should_include_process("nginx", &cfg));
+        assert!(should_include_process("postgres", &cfg));
+        assert!(should_include_process("any_process", &cfg));
+    }
+
+    #[test]
+    fn test_should_include_process_with_exclude() {
+        let mut cfg = Config::default();
+        cfg.exclude_names = Some(vec!["test".to_string(), "debug".to_string()]);
+
+        assert!(!should_include_process("test_app", &cfg));
+        assert!(!should_include_process("debug_server", &cfg));
+        assert!(should_include_process("nginx", &cfg));
+        assert!(should_include_process("production_app", &cfg));
+    }
+
+    #[test]
+    fn test_should_include_process_with_include() {
+        let mut cfg = Config::default();
+        cfg.include_names = Some(vec!["nginx".to_string(), "postgres".to_string()]);
+
+        assert!(should_include_process("nginx", &cfg));
+        assert!(should_include_process("nginx-worker", &cfg));
+        assert!(should_include_process("postgres", &cfg));
+        assert!(!should_include_process("mysql", &cfg));
+        assert!(!should_include_process("redis", &cfg));
+    }
+
+    #[test]
+    fn test_should_include_process_exclude_takes_priority() {
+        let mut cfg = Config::default();
+        cfg.include_names = Some(vec!["app".to_string()]);
+        cfg.exclude_names = Some(vec!["test".to_string()]);
+
+        // "test_app" matches both include ("app") and exclude ("test")
+        // Exclude should take priority
+        assert!(!should_include_process("test_app", &cfg));
+        assert!(should_include_process("prod_app", &cfg));
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests for classify_process (subgroup classification)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_classify_process_raw_unknown() {
+        // Unknown process should fall into "other"/"unknown"
+        let (group, subgroup) = classify_process_raw("totally_unknown_process_xyz123");
+        assert_eq!(group.as_ref(), "other");
+        assert_eq!(subgroup.as_ref(), "unknown");
     }
 }

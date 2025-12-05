@@ -61,6 +61,9 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+[dev-dependencies]
+tempfile = "3.23.0"
+
 [package.metadata.deb]
 name = "herakles-proc-mem-exporter"
 maintainer = "Michael Moll <proc-mem@herakles.io>"
