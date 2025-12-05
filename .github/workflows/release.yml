@@ -122,8 +122,8 @@ jobs:
       - name: Prepare binaries
         run: |
           mkdir -p docker-build/linux/amd64 docker-build/linux/arm64
-          mv herakles-proc-mem-exporter-amd64-musl docker-build/linux/amd64/herakles-proc-mem-exporter
-          mv herakles-proc-mem-exporter-arm64-musl docker-build/linux/arm64/herakles-proc-mem-exporter
+          mv herakles-proc-mem-exporter-amd64-musl/herakles-proc-mem-exporter-amd64-musl docker-build/linux/amd64/herakles-proc-mem-exporter
+          mv herakles-proc-mem-exporter-arm64-musl/herakles-proc-mem-exporter-arm64-musl docker-build/linux/arm64/herakles-proc-mem-exporter
           chmod +x docker-build/linux/amd64/herakles-proc-mem-exporter
           chmod +x docker-build/linux/arm64/herakles-proc-mem-exporter
 
