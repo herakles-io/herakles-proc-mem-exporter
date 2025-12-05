@@ -186,7 +186,7 @@ pub fn validate_effective_config(cfg: &Config) -> Result<(), Box<dyn std::error:
                 return Err("TLS is enabled but tls_cert_path is not set".into());
             }
             (Some(cert), Some(key)) => {
-                // Check if files exist and are readable
+                // Check if files exist
                 let cert_path = std::path::Path::new(cert);
                 let key_path = std::path::Path::new(key);
 
@@ -196,17 +196,26 @@ pub fn validate_effective_config(cfg: &Config) -> Result<(), Box<dyn std::error:
                 if !key_path.exists() {
                     return Err(format!("TLS private key file not found: {}", key).into());
                 }
-                if std::fs::metadata(cert_path)
-                    .map(|m| m.len() == 0)
-                    .unwrap_or(true)
-                {
-                    return Err(format!("TLS certificate file is empty or unreadable: {}", cert).into());
+
+                // Check if files are readable and not empty
+                match std::fs::metadata(cert_path) {
+                    Ok(meta) if meta.len() == 0 => {
+                        return Err(format!("TLS certificate file is empty: {}", cert).into());
+                    }
+                    Err(e) => {
+                        return Err(format!("TLS certificate file is not readable: {} ({})", cert, e).into());
+                    }
+                    Ok(_) => {}
                 }
-                if std::fs::metadata(key_path)
-                    .map(|m| m.len() == 0)
-                    .unwrap_or(true)
-                {
-                    return Err(format!("TLS private key file is empty or unreadable: {}", key).into());
+
+                match std::fs::metadata(key_path) {
+                    Ok(meta) if meta.len() == 0 => {
+                        return Err(format!("TLS private key file is empty: {}", key).into());
+                    }
+                    Err(e) => {
+                        return Err(format!("TLS private key file is not readable: {} ({})", key, e).into());
+                    }
+                    Ok(_) => {}
                 }
             }
         }

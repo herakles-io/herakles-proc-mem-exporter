@@ -603,8 +603,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if enable_tls {
         // TLS is enabled - use axum_server with rustls
-        let cert_path = config.tls_cert_path.as_ref().expect("TLS cert path validated");
-        let key_path = config.tls_key_path.as_ref().expect("TLS key path validated");
+        // These paths are guaranteed to exist since validate_effective_config() was called earlier
+        let cert_path = config.tls_cert_path.as_ref()
+            .expect("tls_cert_path should be set when enable_tls is true (validated at startup)");
+        let key_path = config.tls_key_path.as_ref()
+            .expect("tls_key_path should be set when enable_tls is true (validated at startup)");
 
         info!("Loading TLS certificate from: {}", cert_path);
         info!("Loading TLS private key from: {}", key_path);
