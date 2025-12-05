@@ -4,6 +4,9 @@ use ahash::AHashMap as HashMap;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
 use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
+use herakles_proc_mem_exporter::{
+    AppConfig as HealthAppConfig, BufferHealthConfig, HealthResponse, HealthState,
+};
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, Gauge, GaugeVec, Opts, Registry, TextEncoder};
 use rand::Rng;
@@ -354,6 +357,28 @@ fn get_clk_tck() -> f64 {
 
 /// System clock ticks per second (for CPU time calculation)
 static CLK_TCK: Lazy<f64> = Lazy::new(get_clk_tck);
+
+/// Static atomics for tracking maximum buffer usage across parse operations
+/// These track the actual bytes read through each buffer type
+static MAX_IO_BUFFER_BYTES: AtomicU64 = AtomicU64::new(0);
+static MAX_SMAPS_BUFFER_BYTES: AtomicU64 = AtomicU64::new(0);
+static MAX_SMAPS_ROLLUP_BUFFER_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// Helper to update maximum buffer usage atomically
+fn update_max_buffer_usage(current_max: &AtomicU64, new_value: u64) {
+    let mut current = current_max.load(Ordering::Relaxed);
+    while new_value > current {
+        match current_max.compare_exchange_weak(
+            current,
+            new_value,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(c) => current = c,
+        }
+    }
+}
 
 // Type alias for shared application state
 type SharedState = Arc<AppState>;
@@ -1361,6 +1386,8 @@ struct AppState {
     buffer_config: BufferConfig,
     cpu_cache: StdRwLock<HashMap<u32, CpuEntry>>,
     health_stats: Arc<HealthStats>,
+    /// Health state for buffer monitoring
+    health_state: Arc<HealthState>,
     /// Notification for cache update completion
     cache_ready: Arc<Notify>,
 }
@@ -2391,6 +2418,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize HealthStats instance used by AppState
     let health_stats = Arc::new(HealthStats::new());
+
+    // Initialize HealthState for buffer monitoring with configuration
+    let health_config = HealthAppConfig {
+        io_buffer: BufferHealthConfig {
+            capacity_kb: buffer_config.io_kb,
+            larger_is_better: false,
+            warn_percent: Some(80.0),
+            critical_percent: Some(95.0),
+        },
+        smaps_buffer: BufferHealthConfig {
+            capacity_kb: buffer_config.smaps_kb,
+            larger_is_better: false,
+            warn_percent: Some(80.0),
+            critical_percent: Some(95.0),
+        },
+        smaps_rollup_buffer: BufferHealthConfig {
+            capacity_kb: buffer_config.smaps_rollup_kb,
+            larger_is_better: false,
+            warn_percent: Some(80.0),
+            critical_percent: Some(95.0),
+        },
+    };
+    let health_state = Arc::new(HealthState::new(health_config));
+
     // Create shared application state
     let state = Arc::new(AppState {
         registry,
@@ -2405,6 +2456,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         buffer_config,
         cpu_cache: StdRwLock::new(HashMap::new()),
         health_stats: health_stats.clone(),
+        health_state,
         cache_ready: Arc::new(Notify::new()),
     });
 
@@ -2842,12 +2894,44 @@ async fn health_handler(State(state): State<SharedState>) -> impl IntoResponse {
     // Render plain-text table from HealthStats
     let table = state.health_stats.render_table();
 
+    // Get buffer health and render it
+    let buffer_health = state.health_state.get_health();
+    let buffer_section = render_buffer_health(&buffer_health);
+
     debug!("Health check: {} - {}", status, message);
     (
         status,
         [("Content-Type", "text/plain; charset=utf-8")],
-        format!("{message}\n\n{table}\n{FOOTER_TEXT}"),
+        format!("{message}\n\n{table}\n{buffer_section}\n{FOOTER_TEXT}"),
     )
+}
+
+/// Renders buffer health information as a plain-text table
+fn render_buffer_health(health: &HealthResponse) -> String {
+    let mut out = String::new();
+    writeln!(out, "BUFFER HEALTH").ok();
+    writeln!(out, "=============").ok();
+    writeln!(out).ok();
+    writeln!(
+        out,
+        "{:25} | {:>10} | {:>12} | {:>10}",
+        "Buffer", "Usage (KB)", "Capacity (KB)", "Status"
+    )
+    .ok();
+    writeln!(out, "{}", "-".repeat(70)).ok();
+
+    for buffer in &health.buffers {
+        writeln!(
+            out,
+            "{:25} | {:>10} | {:>12} | {:>10}",
+            buffer.name, buffer.current_kb, buffer.capacity_kb, buffer.status
+        )
+        .ok();
+    }
+
+    writeln!(out).ok();
+    writeln!(out, "Overall Buffer Status: {}", health.overall_status).ok();
+    out
 }
 
 /// Escapes special HTML characters to prevent XSS attacks
@@ -3517,6 +3601,22 @@ async fn update_cache(state: &SharedState) -> Result<(), Box<dyn std::error::Err
     state.health_stats.record_cache_size(scanned);
     state.health_stats.update_last_scan_time();
 
+    // Update buffer usage in health state with actual maximum bytes read
+    // Convert bytes to KB (round up to nearest KB to avoid showing 0)
+    let io_usage_kb = (MAX_IO_BUFFER_BYTES.load(Ordering::Relaxed) + 1023) / 1024;
+    let smaps_usage_kb = (MAX_SMAPS_BUFFER_BYTES.load(Ordering::Relaxed) + 1023) / 1024;
+    let smaps_rollup_usage_kb = (MAX_SMAPS_ROLLUP_BUFFER_BYTES.load(Ordering::Relaxed) + 1023) / 1024;
+
+    state
+        .health_state
+        .update_io_buffer_kb(io_usage_kb as usize);
+    state
+        .health_state
+        .update_smaps_buffer_kb(smaps_usage_kb as usize);
+    state
+        .health_state
+        .update_smaps_rollup_buffer_kb(smaps_rollup_usage_kb as usize);
+
     // Read exporter's own resource usage from /proc/self
     let (exporter_mem_mb, exporter_cpu_pct) = read_self_resources();
     state
@@ -3570,6 +3670,8 @@ fn read_process_name(proc_path: &Path) -> Option<String> {
     if let Ok(s) = fs::read_to_string(&comm) {
         let t = s.trim();
         if !t.is_empty() {
+            // Track io_buffer usage for comm file
+            update_max_buffer_usage(&MAX_IO_BUFFER_BYTES, s.len() as u64);
             return Some(t.into());
         }
     }
@@ -3577,6 +3679,8 @@ fn read_process_name(proc_path: &Path) -> Option<String> {
     let cmd = proc_path.join("cmdline");
     if let Ok(content) = fs::read(&cmd) {
         if !content.is_empty() {
+            // Track io_buffer usage for cmdline file
+            update_max_buffer_usage(&MAX_IO_BUFFER_BYTES, content.len() as u64);
             let parts: Vec<&str> = content
                 .split(|&b| b == 0u8)
                 .filter_map(|s| std::str::from_utf8(s).ok())
@@ -3601,9 +3705,11 @@ fn parse_smaps_rollup(path: &Path, buf_kb: usize) -> Result<(u64, u64, u64), std
     let mut pss_kb = 0;
     let mut private_clean_kb = 0;
     let mut private_dirty_kb = 0;
+    let mut bytes_read: u64 = 0;
 
     for line in reader.lines() {
         let l = line?;
+        bytes_read += l.len() as u64 + 1; // +1 for newline
         if let Some(v) = l.strip_prefix("Rss:") {
             rss_kb += parse_kb_value(v).unwrap_or(0);
         } else if let Some(v) = l.strip_prefix("Pss:") {
@@ -3614,6 +3720,9 @@ fn parse_smaps_rollup(path: &Path, buf_kb: usize) -> Result<(u64, u64, u64), std
             private_dirty_kb += parse_kb_value(v).unwrap_or(0);
         }
     }
+
+    // Update maximum buffer usage for smaps_rollup
+    update_max_buffer_usage(&MAX_SMAPS_ROLLUP_BUFFER_BYTES, bytes_read);
 
     Ok((
         rss_kb * 1024,
@@ -3631,9 +3740,11 @@ fn parse_smaps(path: &Path, buf_kb: usize) -> Result<(u64, u64, u64), std::io::E
     let mut pss = 0;
     let mut pc = 0;
     let mut pd = 0;
+    let mut bytes_read: u64 = 0;
 
     for line in reader.lines() {
         let l = line?;
+        bytes_read += l.len() as u64 + 1; // +1 for newline
         if let Some(kb) = l.strip_prefix("Rss:") {
             rss += parse_kb_value(kb).unwrap_or(0);
         } else if let Some(kb) = l.strip_prefix("Pss:") {
@@ -3644,6 +3755,9 @@ fn parse_smaps(path: &Path, buf_kb: usize) -> Result<(u64, u64, u64), std::io::E
             pd += parse_kb_value(kb).unwrap_or(0);
         }
     }
+
+    // Update maximum buffer usage for smaps
+    update_max_buffer_usage(&MAX_SMAPS_BUFFER_BYTES, bytes_read);
 
     Ok((rss * 1024, pss * 1024, (pc + pd) * 1024))
 }
