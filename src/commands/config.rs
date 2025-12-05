@@ -95,6 +95,12 @@ fn add_config_comments(yaml: String) -> String {
 # enable_pss: true             # Export PSS metrics
 # enable_uss: true             # Export USS metrics
 # enable_cpu: true             # Export CPU metrics
+#
+# TLS/SSL Configuration
+# ---------------------
+# enable_tls: false            # Enable HTTPS (default: false)
+# tls_cert_path: null          # Path to TLS certificate (PEM format)
+# tls_key_path: null           # Path to TLS private key (PEM format)
 "#;
 
     format!("{comments}\n{yaml}")

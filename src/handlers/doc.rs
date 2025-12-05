@@ -60,6 +60,11 @@ Key configuration options:
 - top_n_subgroup: Top-N processes per subgroup (default: 3)
 - top_n_others: Top-N processes for "other" group (default: 10)
 
+TLS/SSL Configuration:
+- enable_tls: Enable HTTPS (default: false)
+- tls_cert_path: Path to TLS certificate (PEM format)
+- tls_key_path: Path to TLS private key (PEM format)
+
 CLI COMMANDS
 ------------
 herakles-proc-mem-exporter                    - Start the exporter
@@ -73,6 +78,9 @@ EXAMPLE USAGE
 -------------
 # Start exporter
 herakles-proc-mem-exporter
+
+# Start exporter with TLS
+herakles-proc-mem-exporter --enable-tls --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
 
 # View this documentation
 curl http://localhost:9215/doc

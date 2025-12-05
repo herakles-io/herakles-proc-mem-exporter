@@ -78,6 +78,14 @@ pub struct Config {
     /// Path to JSON test data file (uses synthetic data instead of /proc)
     #[serde(alias = "test-data-file")]
     pub test_data_file: Option<PathBuf>,
+
+    // TLS/SSL Configuration
+    #[serde(alias = "enable-tls")]
+    pub enable_tls: Option<bool>,
+    #[serde(alias = "tls-cert-path")]
+    pub tls_cert_path: Option<String>,
+    #[serde(alias = "tls-key-path")]
+    pub tls_key_path: Option<String>,
 }
 
 impl Default for Config {
@@ -112,6 +120,9 @@ impl Default for Config {
             enable_uss: Some(true),
             enable_cpu: Some(true),
             test_data_file: None,
+            enable_tls: Some(false),
+            tls_cert_path: None,
+            tls_key_path: None,
         }
     }
 }
@@ -155,6 +166,57 @@ pub fn validate_effective_config(cfg: &Config) -> Result<(), Box<dyn std::error:
                     other
                 )
                 .into());
+            }
+        }
+    }
+
+    // TLS validation
+    if cfg.enable_tls.unwrap_or(false) {
+        let cert_path = cfg.tls_cert_path.as_deref();
+        let key_path = cfg.tls_key_path.as_deref();
+
+        match (cert_path, key_path) {
+            (None, None) => {
+                return Err("TLS is enabled but neither tls_cert_path nor tls_key_path are set".into());
+            }
+            (Some(_), None) => {
+                return Err("TLS is enabled but tls_key_path is not set".into());
+            }
+            (None, Some(_)) => {
+                return Err("TLS is enabled but tls_cert_path is not set".into());
+            }
+            (Some(cert), Some(key)) => {
+                // Check if files exist
+                let cert_path = std::path::Path::new(cert);
+                let key_path = std::path::Path::new(key);
+
+                if !cert_path.exists() {
+                    return Err(format!("TLS certificate file not found: {}", cert).into());
+                }
+                if !key_path.exists() {
+                    return Err(format!("TLS private key file not found: {}", key).into());
+                }
+
+                // Check if files are readable and not empty
+                match std::fs::metadata(cert_path) {
+                    Ok(meta) if meta.len() == 0 => {
+                        return Err(format!("TLS certificate file is empty: {}", cert).into());
+                    }
+                    Err(e) => {
+                        return Err(format!("TLS certificate file is not readable: {} ({})", cert, e).into());
+                    }
+                    Ok(_) => {}
+                }
+
+                match std::fs::metadata(key_path) {
+                    Ok(meta) if meta.len() == 0 => {
+                        return Err(format!("TLS private key file is empty: {}", key).into());
+                    }
+                    Err(e) => {
+                        return Err(format!("TLS private key file is not readable: {} ({})", key, e).into());
+                    }
+                    Ok(_) => {}
+                }
             }
         }
     }
@@ -243,6 +305,17 @@ pub fn resolve_config(args: &Args) -> Result<Config, Box<dyn std::error::Error>>
     // Test data file: CLI wins if provided
     if let Some(test_file) = &args.test_data_file {
         config.test_data_file = Some(test_file.clone());
+    }
+
+    // TLS configuration: CLI wins if provided
+    if args.enable_tls {
+        config.enable_tls = Some(true);
+    }
+    if let Some(cert_path) = &args.tls_cert {
+        config.tls_cert_path = Some(cert_path.to_string_lossy().to_string());
+    }
+    if let Some(key_path) = &args.tls_key {
+        config.tls_key_path = Some(key_path.to_string_lossy().to_string());
     }
 
     Ok(config)
