@@ -3,8 +3,8 @@
 //! This module provides functions to classify processes into groups and subgroups
 //! based on their names, using a configurable mapping loaded from TOML files.
 
-use ahash::AHashMap as HashMap;
 use crate::config::Config;
+use ahash::AHashMap as HashMap;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::fs;
@@ -105,7 +105,10 @@ pub fn classify_process_raw(process_name: &str) -> (Arc<str>, Arc<str>) {
 }
 
 /// Classification including config rules (include/exclude, disable_others).
-pub fn classify_process_with_config(process_name: &str, cfg: &Config) -> Option<(Arc<str>, Arc<str>)> {
+pub fn classify_process_with_config(
+    process_name: &str,
+    cfg: &Config,
+) -> Option<(Arc<str>, Arc<str>)> {
     let (group, subgroup) = classify_process_raw(process_name);
 
     // If user explicitly disabled "other" bucket, drop these processes

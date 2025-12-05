@@ -201,33 +201,68 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_rss
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
+                            .with_label_values(&[
+                                group_ref,
+                                subgroup_ref,
+                                &rank_s,
+                                &pid_s,
+                                name_s,
+                                &uptime_seconds,
+                            ])
                             .set(p.rss as f64);
                     }
                     if enable_pss {
                         state
                             .metrics
                             .top_pss
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
+                            .with_label_values(&[
+                                group_ref,
+                                subgroup_ref,
+                                &rank_s,
+                                &pid_s,
+                                name_s,
+                                &uptime_seconds,
+                            ])
                             .set(p.pss as f64);
                     }
                     if enable_uss {
                         state
                             .metrics
                             .top_uss
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
+                            .with_label_values(&[
+                                group_ref,
+                                subgroup_ref,
+                                &rank_s,
+                                &pid_s,
+                                name_s,
+                                &uptime_seconds,
+                            ])
                             .set(p.uss as f64);
                     }
                     if enable_cpu {
                         state
                             .metrics
                             .top_cpu_percent
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
+                            .with_label_values(&[
+                                group_ref,
+                                subgroup_ref,
+                                &rank_s,
+                                &pid_s,
+                                name_s,
+                                &uptime_seconds,
+                            ])
                             .set(p.cpu_percent as f64);
                         state
                             .metrics
                             .top_cpu_time
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
+                            .with_label_values(&[
+                                group_ref,
+                                subgroup_ref,
+                                &rank_s,
+                                &pid_s,
+                                name_s,
+                                &uptime_seconds,
+                            ])
                             .set(p.cpu_time_seconds as f64);
                     }
 
@@ -237,7 +272,14 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_cpu_percent_of_subgroup
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
+                            .with_label_values(&[
+                                group_ref,
+                                subgroup_ref,
+                                &rank_s,
+                                &pid_s,
+                                name_s,
+                                &uptime_seconds,
+                            ])
                             .set(pct);
                     }
 
@@ -246,7 +288,14 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_rss_percent_of_subgroup
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
+                            .with_label_values(&[
+                                group_ref,
+                                subgroup_ref,
+                                &rank_s,
+                                &pid_s,
+                                name_s,
+                                &uptime_seconds,
+                            ])
                             .set(pct);
                     }
 
@@ -255,7 +304,14 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_pss_percent_of_subgroup
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
+                            .with_label_values(&[
+                                group_ref,
+                                subgroup_ref,
+                                &rank_s,
+                                &pid_s,
+                                name_s,
+                                &uptime_seconds,
+                            ])
                             .set(pct);
                     }
 
@@ -264,7 +320,14 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                         state
                             .metrics
                             .top_uss_percent_of_subgroup
-                            .with_label_values(&[group_ref, subgroup_ref, &rank_s, &pid_s, name_s, &uptime_seconds])
+                            .with_label_values(&[
+                                group_ref,
+                                subgroup_ref,
+                                &rank_s,
+                                &pid_s,
+                                name_s,
+                                &uptime_seconds,
+                            ])
                             .set(pct);
                     }
                 }

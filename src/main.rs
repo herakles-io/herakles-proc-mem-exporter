@@ -39,14 +39,17 @@ use cli::{Args, Commands, LogLevel};
 use commands::{
     command_check, command_config, command_generate_testdata, command_subgroups, command_test,
 };
-use config::{resolve_config, show_config, validate_effective_config, Config, DEFAULT_BIND_ADDR, DEFAULT_CACHE_TTL, DEFAULT_PORT};
+use config::{
+    resolve_config, show_config, validate_effective_config, Config, DEFAULT_BIND_ADDR,
+    DEFAULT_CACHE_TTL, DEFAULT_PORT,
+};
 use handlers::{config_handler, doc_handler, health_handler, metrics_handler, subgroups_handler};
 use health_stats::HealthStats;
 use metrics::MemoryMetrics;
 use process::{
-    classify_process_raw, collect_proc_entries, get_cpu_stat_for_pid,
-    parse_memory_for_process, read_process_name, should_include_process, BufferConfig,
-    MAX_IO_BUFFER_BYTES, MAX_SMAPS_BUFFER_BYTES, MAX_SMAPS_ROLLUP_BUFFER_BYTES, CLK_TCK,
+    classify_process_raw, collect_proc_entries, get_cpu_stat_for_pid, parse_memory_for_process,
+    read_process_name, should_include_process, BufferConfig, CLK_TCK, MAX_IO_BUFFER_BYTES,
+    MAX_SMAPS_BUFFER_BYTES, MAX_SMAPS_ROLLUP_BUFFER_BYTES,
 };
 use state::{AppState, SharedState};
 
@@ -604,9 +607,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if enable_tls {
         // TLS is enabled - use axum_server with rustls
         // These paths are guaranteed to exist since validate_effective_config() was called earlier
-        let cert_path = config.tls_cert_path.as_ref()
+        let cert_path = config
+            .tls_cert_path
+            .as_ref()
             .expect("tls_cert_path should be set when enable_tls is true (validated at startup)");
-        let key_path = config.tls_key_path.as_ref()
+        let key_path = config
+            .tls_key_path
+            .as_ref()
             .expect("tls_key_path should be set when enable_tls is true (validated at startup)");
 
         info!("Loading TLS certificate from: {}", cert_path);

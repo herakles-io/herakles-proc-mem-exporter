@@ -143,14 +143,8 @@ pub fn validate_effective_config(cfg: &Config) -> Result<(), Box<dyn std::error:
 
     // Search mode validation
     if let Some(mode) = cfg.search_mode.as_deref() {
-        let has_groups = cfg
-            .search_groups
-            .as_ref()
-            .is_some_and(|v| !v.is_empty());
-        let has_subgroups = cfg
-            .search_subgroups
-            .as_ref()
-            .is_some_and(|v| !v.is_empty());
+        let has_groups = cfg.search_groups.as_ref().is_some_and(|v| !v.is_empty());
+        let has_subgroups = cfg.search_subgroups.as_ref().is_some_and(|v| !v.is_empty());
 
         match mode {
             "include" | "exclude" => {
@@ -177,7 +171,9 @@ pub fn validate_effective_config(cfg: &Config) -> Result<(), Box<dyn std::error:
 
         match (cert_path, key_path) {
             (None, None) => {
-                return Err("TLS is enabled but neither tls_cert_path nor tls_key_path are set".into());
+                return Err(
+                    "TLS is enabled but neither tls_cert_path nor tls_key_path are set".into(),
+                );
             }
             (Some(_), None) => {
                 return Err("TLS is enabled but tls_key_path is not set".into());
@@ -203,7 +199,11 @@ pub fn validate_effective_config(cfg: &Config) -> Result<(), Box<dyn std::error:
                         return Err(format!("TLS certificate file is empty: {}", cert).into());
                     }
                     Err(e) => {
-                        return Err(format!("TLS certificate file is not readable: {} ({})", cert, e).into());
+                        return Err(format!(
+                            "TLS certificate file is not readable: {} ({})",
+                            cert, e
+                        )
+                        .into());
                     }
                     Ok(_) => {}
                 }
@@ -213,7 +213,11 @@ pub fn validate_effective_config(cfg: &Config) -> Result<(), Box<dyn std::error:
                         return Err(format!("TLS private key file is empty: {}", key).into());
                     }
                     Err(e) => {
-                        return Err(format!("TLS private key file is not readable: {} ({})", key, e).into());
+                        return Err(format!(
+                            "TLS private key file is not readable: {} ({})",
+                            key, e
+                        )
+                        .into());
                     }
                     Ok(_) => {}
                 }

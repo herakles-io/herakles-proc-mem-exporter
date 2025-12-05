@@ -33,7 +33,12 @@ fn test_tls_enabled_without_paths() {
 #[test]
 fn test_tls_enabled_with_cert_only() {
     let output = std::process::Command::new(binary_path())
-        .args(["--enable-tls", "--tls-cert", "/some/path.pem", "--check-config"])
+        .args([
+            "--enable-tls",
+            "--tls-cert",
+            "/some/path.pem",
+            "--check-config",
+        ])
         .output()
         .expect("Failed to execute command");
 
@@ -53,7 +58,12 @@ fn test_tls_enabled_with_cert_only() {
 #[test]
 fn test_tls_enabled_with_key_only() {
     let output = std::process::Command::new(binary_path())
-        .args(["--enable-tls", "--tls-key", "/some/path.pem", "--check-config"])
+        .args([
+            "--enable-tls",
+            "--tls-key",
+            "/some/path.pem",
+            "--check-config",
+        ])
         .output()
         .expect("Failed to execute command");
 
@@ -104,30 +114,56 @@ fn test_tls_enabled_with_valid_files() {
     let mut key_file = NamedTempFile::new().expect("Failed to create temp key file");
 
     // Write some dummy content (doesn't need to be valid for check-config)
-    writeln!(cert_file, "-----BEGIN CERTIFICATE-----\nDUMMY\n-----END CERTIFICATE-----")
-        .expect("Failed to write cert");
-    writeln!(key_file, "-----BEGIN PRIVATE KEY-----\nDUMMY\n-----END PRIVATE KEY-----")
-        .expect("Failed to write key");
+    writeln!(
+        cert_file,
+        "-----BEGIN CERTIFICATE-----\nDUMMY\n-----END CERTIFICATE-----"
+    )
+    .expect("Failed to write cert");
+    cert_file.flush().expect("Failed to flush cert file");
+
+    writeln!(
+        key_file,
+        "-----BEGIN PRIVATE KEY-----\nDUMMY\n-----END PRIVATE KEY-----"
+    )
+    .expect("Failed to write key");
+    key_file.flush().expect("Failed to flush key file");
+
+    let cert_path = cert_file.path().to_str().unwrap();
+    let key_path = key_file.path().to_str().unwrap();
 
     let output = std::process::Command::new(binary_path())
         .args([
             "--enable-tls",
             "--tls-cert",
-            cert_file.path().to_str().unwrap(),
+            cert_path,
             "--tls-key",
-            key_file.path().to_str().unwrap(),
+            key_path,
             "--check-config",
         ])
         .output()
         .expect("Failed to execute command");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
 
-    assert!(output.status.success(), "Expected config validation to pass with valid files");
+    // Print diagnostic info if the command fails
+    if !output.status.success() {
+        eprintln!("Command failed with status: {:?}", output.status);
+        eprintln!("stdout:\n{}", stdout);
+        eprintln!("stderr:\n{}", stderr);
+    }
+
+    assert!(
+        output.status.success(),
+        "Expected config validation to pass with valid files\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
+    );
     assert!(
         stdout.contains("Configuration is valid"),
-        "Expected success message, got: '{}'",
-        stdout
+        "Expected success message\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
     );
 }
 
@@ -158,7 +194,16 @@ fn test_tls_config_in_show_config() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success());
-    assert!(stdout.contains("enable_tls:"), "Expected enable_tls in config output");
-    assert!(stdout.contains("tls_cert_path:"), "Expected tls_cert_path in config output");
-    assert!(stdout.contains("tls_key_path:"), "Expected tls_key_path in config output");
+    assert!(
+        stdout.contains("enable_tls:"),
+        "Expected enable_tls in config output"
+    );
+    assert!(
+        stdout.contains("tls_cert_path:"),
+        "Expected tls_cert_path in config output"
+    );
+    assert!(
+        stdout.contains("tls_key_path:"),
+        "Expected tls_key_path in config output"
+    );
 }
