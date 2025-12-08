@@ -337,6 +337,13 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
             // Update system-wide metrics
             match system::read_load_average() {
                 Ok(load_avg) => {
+                    // Set new load metrics with required names
+                    state.metrics.set_system_load_metrics(
+                        load_avg.one_min,
+                        load_avg.five_min,
+                        load_avg.fifteen_min,
+                    );
+
                     match system::get_cpu_core_count() {
                         Ok(cpu_cores) => {
                             match system::read_memory_info() {
@@ -362,6 +369,29 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                 }
                 Err(e) => {
                     warn!("Failed to read load average: {}", e);
+                }
+            }
+
+            // Set new extended memory metrics
+            match system::read_extended_memory_info() {
+                Ok(mem_info) => {
+                    state.metrics.set_system_memory_metrics(
+                        mem_info.total_bytes,
+                        mem_info.available_bytes,
+                    );
+                }
+                Err(e) => {
+                    warn!("Failed to read extended memory info: {}", e);
+                }
+            }
+
+            // Set CPU usage ratio metrics
+            match state.system_cpu_cache.calculate_usage_ratios() {
+                Ok(cpu_ratios) => {
+                    state.metrics.set_system_cpu_usage_ratios(&cpu_ratios);
+                }
+                Err(e) => {
+                    warn!("Failed to calculate CPU usage ratios: {}", e);
                 }
             }
 
