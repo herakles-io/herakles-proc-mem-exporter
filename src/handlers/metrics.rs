@@ -8,11 +8,12 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use prometheus::{Encoder, TextEncoder};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, instrument, warn};
 
 use crate::cache::ProcMem;
 use crate::process::classify_process_with_config;
 use crate::state::SharedState;
+use crate::system;
 
 /// Buffer capacity for metrics encoding.
 const BUFFER_CAP: usize = 512 * 1024;
@@ -330,6 +331,37 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
                             ])
                             .set(pct);
                     }
+                }
+            }
+
+            // Update system-wide metrics
+            match system::read_load_average() {
+                Ok(load_avg) => {
+                    match system::get_cpu_core_count() {
+                        Ok(cpu_cores) => {
+                            match system::read_memory_info() {
+                                Ok(mem_info) => {
+                                    state.metrics.set_system_metrics(
+                                        load_avg.one_min,
+                                        load_avg.five_min,
+                                        load_avg.fifteen_min,
+                                        cpu_cores,
+                                        mem_info.total_ram,
+                                        mem_info.total_swap,
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!("Failed to read memory info: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to get CPU core count: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to read load average: {}", e);
                 }
             }
 

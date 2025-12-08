@@ -4,7 +4,7 @@
 //! memory and CPU usage information.
 
 use crate::config::Config;
-use prometheus::{GaugeVec, Opts, Registry};
+use prometheus::{Gauge, GaugeVec, Opts, Registry};
 
 /// Collection of Prometheus metrics for memory and CPU monitoring.
 #[derive(Clone)]
@@ -34,6 +34,16 @@ pub struct MemoryMetrics {
     pub top_rss_percent_of_subgroup: GaugeVec,
     pub top_pss_percent_of_subgroup: GaugeVec,
     pub top_uss_percent_of_subgroup: GaugeVec,
+
+    // System-wide metrics
+    pub system_load_1min_total: Gauge,
+    pub system_load_5min_total: Gauge,
+    pub system_load_15min_total: Gauge,
+    pub system_load_1min_per_core: GaugeVec,
+    pub system_load_5min_per_core: GaugeVec,
+    pub system_load_15min_per_core: GaugeVec,
+    pub system_ram: Gauge,
+    pub system_swap: Gauge,
 }
 
 impl MemoryMetrics {
@@ -235,6 +245,49 @@ impl MemoryMetrics {
             ],
         )?;
 
+        // System-wide metrics
+        let system_load_1min_total = Gauge::new(
+            "herakles_proc_mem_system_load_1min_total",
+            "System load average over 1 minute",
+        )?;
+        let system_load_5min_total = Gauge::new(
+            "herakles_proc_mem_system_load_5min_total",
+            "System load average over 5 minutes",
+        )?;
+        let system_load_15min_total = Gauge::new(
+            "herakles_proc_mem_system_load_15min_total",
+            "System load average over 15 minutes",
+        )?;
+        let system_load_1min_per_core = GaugeVec::new(
+            Opts::new(
+                "herakles_proc_mem_system_load_1min_per_core",
+                "System load average over 1 minute divided by number of CPU cores (normalized load)",
+            ),
+            &["core"],
+        )?;
+        let system_load_5min_per_core = GaugeVec::new(
+            Opts::new(
+                "herakles_proc_mem_system_load_5min_per_core",
+                "System load average over 5 minutes divided by number of CPU cores (normalized load)",
+            ),
+            &["core"],
+        )?;
+        let system_load_15min_per_core = GaugeVec::new(
+            Opts::new(
+                "herakles_proc_mem_system_load_15min_per_core",
+                "System load average over 15 minutes divided by number of CPU cores (normalized load)",
+            ),
+            &["core"],
+        )?;
+        let system_ram = Gauge::new(
+            "herakles_proc_mem_system_RAM",
+            "Total system RAM in bytes",
+        )?;
+        let system_swap = Gauge::new(
+            "herakles_proc_mem_system_SWAP",
+            "Total system SWAP in bytes",
+        )?;
+
         registry.register(Box::new(rss.clone()))?;
         registry.register(Box::new(pss.clone()))?;
         registry.register(Box::new(uss.clone()))?;
@@ -258,6 +311,15 @@ impl MemoryMetrics {
         registry.register(Box::new(top_pss_percent_of_subgroup.clone()))?;
         registry.register(Box::new(top_uss_percent_of_subgroup.clone()))?;
 
+        registry.register(Box::new(system_load_1min_total.clone()))?;
+        registry.register(Box::new(system_load_5min_total.clone()))?;
+        registry.register(Box::new(system_load_15min_total.clone()))?;
+        registry.register(Box::new(system_load_1min_per_core.clone()))?;
+        registry.register(Box::new(system_load_5min_per_core.clone()))?;
+        registry.register(Box::new(system_load_15min_per_core.clone()))?;
+        registry.register(Box::new(system_ram.clone()))?;
+        registry.register(Box::new(system_swap.clone()))?;
+
         Ok(Self {
             rss,
             pss,
@@ -278,6 +340,14 @@ impl MemoryMetrics {
             top_rss_percent_of_subgroup,
             top_pss_percent_of_subgroup,
             top_uss_percent_of_subgroup,
+            system_load_1min_total,
+            system_load_5min_total,
+            system_load_15min_total,
+            system_load_1min_per_core,
+            system_load_5min_per_core,
+            system_load_15min_per_core,
+            system_ram,
+            system_swap,
         })
     }
 
@@ -305,6 +375,53 @@ impl MemoryMetrics {
         self.top_rss_percent_of_subgroup.reset();
         self.top_pss_percent_of_subgroup.reset();
         self.top_uss_percent_of_subgroup.reset();
+
+        // Reset system-wide metrics
+        self.system_load_1min_per_core.reset();
+        self.system_load_5min_per_core.reset();
+        self.system_load_15min_per_core.reset();
+    }
+
+    /// Sets system-wide metrics (load average, RAM, SWAP).
+    ///
+    /// The per-core load metrics represent the system load average divided by the
+    /// number of CPU cores, providing a normalized view of load distribution.
+    /// This is useful for capacity planning and understanding relative load pressure.
+    pub fn set_system_metrics(
+        &self,
+        load_1min: f64,
+        load_5min: f64,
+        load_15min: f64,
+        cpu_cores: usize,
+        total_ram: u64,
+        total_swap: u64,
+    ) {
+        self.system_load_1min_total.set(load_1min);
+        self.system_load_5min_total.set(load_5min);
+        self.system_load_15min_total.set(load_15min);
+
+        // Calculate normalized per-core load for capacity planning
+        if cpu_cores > 0 {
+            let load_1min_per_core = load_1min / cpu_cores as f64;
+            let load_5min_per_core = load_5min / cpu_cores as f64;
+            let load_15min_per_core = load_15min / cpu_cores as f64;
+
+            for core in 0..cpu_cores {
+                let core_label = core.to_string();
+                self.system_load_1min_per_core
+                    .with_label_values(&[&core_label])
+                    .set(load_1min_per_core);
+                self.system_load_5min_per_core
+                    .with_label_values(&[&core_label])
+                    .set(load_5min_per_core);
+                self.system_load_15min_per_core
+                    .with_label_values(&[&core_label])
+                    .set(load_15min_per_core);
+            }
+        }
+
+        self.system_ram.set(total_ram as f64);
+        self.system_swap.set(total_swap as f64);
     }
 
     /// Sets metric values for a specific process with classification.

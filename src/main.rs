@@ -12,6 +12,7 @@ mod health_stats;
 mod metrics;
 mod process;
 mod state;
+mod system;
 
 use ahash::AHashMap as HashMap;
 use axum::{routing::get, Router};
