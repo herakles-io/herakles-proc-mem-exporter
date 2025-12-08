@@ -48,7 +48,8 @@ impl CpuStat {
         self.user + self.nice + self.system + self.idle + self.iowait + self.irq + self.softirq + self.steal
     }
 
-    /// Calculate idle time (idle + iowait).
+    /// Calculate non-active time (idle + iowait).
+    /// This includes both true idle time and time spent waiting for I/O operations.
     pub fn idle_total(&self) -> u64 {
         self.idle + self.iowait
     }
@@ -267,10 +268,10 @@ impl CpuStatsCache {
             for (cpu_name, current) in &current_stats {
                 if let Some(previous) = prev_stats.get(cpu_name) {
                     let delta_total = current.total().saturating_sub(previous.total());
-                    let delta_idle = current.idle_total().saturating_sub(previous.idle_total());
+                    let delta_non_active = current.idle_total().saturating_sub(previous.idle_total());
                     
                     let ratio = if delta_total > 0 {
-                        (delta_total - delta_idle) as f64 / delta_total as f64
+                        (delta_total - delta_non_active) as f64 / delta_total as f64
                     } else {
                         0.0
                     };
