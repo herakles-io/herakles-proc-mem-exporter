@@ -261,21 +261,21 @@ impl MemoryMetrics {
         let system_load_1min_per_core = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_system_load_1min_per_core",
-                "System load average over 1 minute per CPU core",
+                "System load average over 1 minute divided by number of CPU cores (normalized load)",
             ),
             &["core"],
         )?;
         let system_load_5min_per_core = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_system_load_5min_per_core",
-                "System load average over 5 minutes per CPU core",
+                "System load average over 5 minutes divided by number of CPU cores (normalized load)",
             ),
             &["core"],
         )?;
         let system_load_15min_per_core = GaugeVec::new(
             Opts::new(
                 "herakles_proc_mem_system_load_15min_per_core",
-                "System load average over 15 minutes per CPU core",
+                "System load average over 15 minutes divided by number of CPU cores (normalized load)",
             ),
             &["core"],
         )?;
@@ -383,6 +383,10 @@ impl MemoryMetrics {
     }
 
     /// Sets system-wide metrics (load average, RAM, SWAP).
+    ///
+    /// The per-core load metrics represent the system load average divided by the
+    /// number of CPU cores, providing a normalized view of load distribution.
+    /// This is useful for capacity planning and understanding relative load pressure.
     pub fn set_system_metrics(
         &self,
         load_1min: f64,
@@ -396,7 +400,7 @@ impl MemoryMetrics {
         self.system_load_5min_total.set(load_5min);
         self.system_load_15min_total.set(load_15min);
 
-        // Calculate per-core load
+        // Calculate normalized per-core load for capacity planning
         if cpu_cores > 0 {
             let load_1min_per_core = load_1min / cpu_cores as f64;
             let load_5min_per_core = load_5min / cpu_cores as f64;
