@@ -14,6 +14,7 @@ use crate::config::Config;
 use crate::health_stats::HealthStats;
 use crate::metrics::MemoryMetrics;
 use crate::process::{BufferConfig, CpuEntry};
+use crate::system::CpuStatsCache;
 
 /// Type alias for shared application state.
 pub type SharedState = Arc<AppState>;
@@ -36,4 +37,6 @@ pub struct AppState {
     pub health_state: Arc<HealthState>,
     /// Notification for cache update completion.
     pub cache_ready: Arc<Notify>,
+    /// CPU statistics cache for calculating usage ratios.
+    pub system_cpu_cache: CpuStatsCache,
 }

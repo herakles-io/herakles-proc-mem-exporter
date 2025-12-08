@@ -44,6 +44,15 @@ pub struct MemoryMetrics {
     pub system_load_15min_per_core: GaugeVec,
     pub system_ram: Gauge,
     pub system_swap: Gauge,
+
+    // New system metrics as per requirements
+    pub system_memory_total_bytes: Gauge,
+    pub system_memory_available_bytes: Gauge,
+    pub system_memory_used_ratio: Gauge,
+    pub system_cpu_usage_ratio: GaugeVec,
+    pub system_load1: Gauge,
+    pub system_load5: Gauge,
+    pub system_load15: Gauge,
 }
 
 impl MemoryMetrics {
@@ -288,6 +297,39 @@ impl MemoryMetrics {
             "Total system SWAP in bytes",
         )?;
 
+        // New system metrics as per requirements
+        let system_memory_total_bytes = Gauge::new(
+            "herakles_system_memory_total_bytes",
+            "Total system memory in bytes (MemTotal from /proc/meminfo)",
+        )?;
+        let system_memory_available_bytes = Gauge::new(
+            "herakles_system_memory_available_bytes",
+            "Available system memory in bytes (MemAvailable from /proc/meminfo)",
+        )?;
+        let system_memory_used_ratio = Gauge::new(
+            "herakles_system_memory_used_ratio",
+            "Memory used ratio: 1 - (available_bytes / total_bytes), value between 0.0 and 1.0",
+        )?;
+        let system_cpu_usage_ratio = GaugeVec::new(
+            Opts::new(
+                "herakles_system_cpu_usage_ratio",
+                "CPU usage ratio per core and total, calculated from /proc/stat deltas",
+            ),
+            &["cpu"],
+        )?;
+        let system_load1 = Gauge::new(
+            "herakles_system_load1",
+            "System load average over 1 minute",
+        )?;
+        let system_load5 = Gauge::new(
+            "herakles_system_load5",
+            "System load average over 5 minutes",
+        )?;
+        let system_load15 = Gauge::new(
+            "herakles_system_load15",
+            "System load average over 15 minutes",
+        )?;
+
         registry.register(Box::new(rss.clone()))?;
         registry.register(Box::new(pss.clone()))?;
         registry.register(Box::new(uss.clone()))?;
@@ -320,6 +362,14 @@ impl MemoryMetrics {
         registry.register(Box::new(system_ram.clone()))?;
         registry.register(Box::new(system_swap.clone()))?;
 
+        registry.register(Box::new(system_memory_total_bytes.clone()))?;
+        registry.register(Box::new(system_memory_available_bytes.clone()))?;
+        registry.register(Box::new(system_memory_used_ratio.clone()))?;
+        registry.register(Box::new(system_cpu_usage_ratio.clone()))?;
+        registry.register(Box::new(system_load1.clone()))?;
+        registry.register(Box::new(system_load5.clone()))?;
+        registry.register(Box::new(system_load15.clone()))?;
+
         Ok(Self {
             rss,
             pss,
@@ -348,6 +398,13 @@ impl MemoryMetrics {
             system_load_15min_per_core,
             system_ram,
             system_swap,
+            system_memory_total_bytes,
+            system_memory_available_bytes,
+            system_memory_used_ratio,
+            system_cpu_usage_ratio,
+            system_load1,
+            system_load5,
+            system_load15,
         })
     }
 
@@ -380,6 +437,9 @@ impl MemoryMetrics {
         self.system_load_1min_per_core.reset();
         self.system_load_5min_per_core.reset();
         self.system_load_15min_per_core.reset();
+
+        // Reset new system metrics
+        self.system_cpu_usage_ratio.reset();
     }
 
     /// Sets system-wide metrics (load average, RAM, SWAP).
@@ -422,6 +482,36 @@ impl MemoryMetrics {
 
         self.system_ram.set(total_ram as f64);
         self.system_swap.set(total_swap as f64);
+    }
+
+    /// Sets new system memory metrics (total, available, used ratio).
+    pub fn set_system_memory_metrics(&self, total_bytes: u64, available_bytes: u64) {
+        self.system_memory_total_bytes.set(total_bytes as f64);
+        self.system_memory_available_bytes.set(available_bytes as f64);
+        
+        // Calculate used ratio: 1 - (available / total)
+        if total_bytes > 0 {
+            let used_ratio = 1.0 - (available_bytes as f64 / total_bytes as f64);
+            self.system_memory_used_ratio.set(used_ratio);
+        } else {
+            self.system_memory_used_ratio.set(0.0);
+        }
+    }
+
+    /// Sets CPU usage ratio metrics for each CPU core and total.
+    pub fn set_system_cpu_usage_ratios(&self, cpu_ratios: &std::collections::HashMap<String, f64>) {
+        for (cpu_name, ratio) in cpu_ratios {
+            self.system_cpu_usage_ratio
+                .with_label_values(&[cpu_name])
+                .set(*ratio);
+        }
+    }
+
+    /// Sets load average metrics with the new metric names.
+    pub fn set_system_load_metrics(&self, load_1min: f64, load_5min: f64, load_15min: f64) {
+        self.system_load1.set(load_1min);
+        self.system_load5.set(load_5min);
+        self.system_load15.set(load_15min);
     }
 
     /// Sets metric values for a specific process with classification.

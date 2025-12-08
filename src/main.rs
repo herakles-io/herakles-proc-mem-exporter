@@ -53,6 +53,7 @@ use process::{
     MAX_SMAPS_BUFFER_BYTES, MAX_SMAPS_ROLLUP_BUFFER_BYTES,
 };
 use state::{AppState, SharedState};
+use system::CpuStatsCache;
 
 // Re-export load_test_data_from_file for use in update_cache
 use commands::generate::load_test_data_from_file;
@@ -521,6 +522,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         health_stats: health_stats.clone(),
         health_state,
         cache_ready: Arc::new(Notify::new()),
+        system_cpu_cache: CpuStatsCache::new(),
     });
 
     // Perform initial cache population
