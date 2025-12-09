@@ -354,8 +354,8 @@ herakles_system_cpu_usage_ratio{cpu=~"cpu[0-9]+"}
 # System load normalized by available cores
 herakles_system_load1 / count(herakles_system_cpu_usage_ratio{cpu=~"cpu[0-9]+"})
 
-# System load trend
-rate(herakles_system_load1[5m])
+# System under high load (load1 > number of cores)
+herakles_system_load1 > count(herakles_system_cpu_usage_ratio{cpu=~"cpu[0-9]+"})
 ```
 
 ## Next Steps
