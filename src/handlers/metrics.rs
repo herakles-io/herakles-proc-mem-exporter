@@ -337,35 +337,12 @@ pub async fn metrics_handler(State(state): State<SharedState>) -> Result<String,
             // Update system-wide metrics
             match system::read_load_average() {
                 Ok(load_avg) => {
-                    // Set new load metrics with required names
+                    // Set load metrics
                     state.metrics.set_system_load_metrics(
                         load_avg.one_min,
                         load_avg.five_min,
                         load_avg.fifteen_min,
                     );
-
-                    match system::get_cpu_core_count() {
-                        Ok(cpu_cores) => {
-                            match system::read_memory_info() {
-                                Ok(mem_info) => {
-                                    state.metrics.set_system_metrics(
-                                        load_avg.one_min,
-                                        load_avg.five_min,
-                                        load_avg.fifteen_min,
-                                        cpu_cores,
-                                        mem_info.total_ram,
-                                        mem_info.total_swap,
-                                    );
-                                }
-                                Err(e) => {
-                                    warn!("Failed to read memory info: {}", e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to get CPU core count: {}", e);
-                        }
-                    }
                 }
                 Err(e) => {
                     warn!("Failed to read load average: {}", e);

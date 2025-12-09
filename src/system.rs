@@ -15,13 +15,6 @@ pub struct LoadAverage {
     pub fifteen_min: f64,
 }
 
-/// System memory information in bytes.
-#[derive(Debug, Clone, Copy)]
-pub struct MemoryInfo {
-    pub total_ram: u64,
-    pub total_swap: u64,
-}
-
 /// Extended memory information including available memory.
 #[derive(Debug, Clone, Copy)]
 pub struct ExtendedMemoryInfo {
@@ -86,69 +79,6 @@ pub fn read_load_average() -> Result<LoadAverage, String> {
         five_min,
         fifteen_min,
     })
-}
-
-/// Reads total RAM and SWAP from /proc/meminfo.
-///
-/// Returns total memory in bytes.
-/// Looks for "MemTotal:" and "SwapTotal:" lines.
-pub fn read_memory_info() -> Result<MemoryInfo, String> {
-    let content = fs::read_to_string("/proc/meminfo")
-        .map_err(|e| format!("Failed to read /proc/meminfo: {}", e))?;
-
-    let mut total_ram: Option<u64> = None;
-    let mut total_swap: Option<u64> = None;
-
-    for line in content.lines() {
-        if line.starts_with("MemTotal:") {
-            // Format: "MemTotal:       16384000 kB"
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                if let Ok(kb) = parts[1].parse::<u64>() {
-                    total_ram = Some(kb * 1024); // Convert KB to bytes
-                }
-            }
-        } else if line.starts_with("SwapTotal:") {
-            // Format: "SwapTotal:       8192000 kB"
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                if let Ok(kb) = parts[1].parse::<u64>() {
-                    total_swap = Some(kb * 1024); // Convert KB to bytes
-                }
-            }
-        }
-
-        if total_ram.is_some() && total_swap.is_some() {
-            break;
-        }
-    }
-
-    match (total_ram, total_swap) {
-        (Some(ram), Some(swap)) => Ok(MemoryInfo {
-            total_ram: ram,
-            total_swap: swap,
-        }),
-        _ => Err("Failed to parse MemTotal or SwapTotal from /proc/meminfo".to_string()),
-    }
-}
-
-/// Gets the number of CPU cores.
-///
-/// Reads from /proc/cpuinfo and counts the number of "processor" lines.
-pub fn get_cpu_core_count() -> Result<usize, String> {
-    let content = fs::read_to_string("/proc/cpuinfo")
-        .map_err(|e| format!("Failed to read /proc/cpuinfo: {}", e))?;
-
-    let count = content
-        .lines()
-        .filter(|line| line.starts_with("processor"))
-        .count();
-
-    if count == 0 {
-        return Err("No processors found in /proc/cpuinfo".to_string());
-    }
-
-    Ok(count)
 }
 
 /// Reads extended memory information from /proc/meminfo including MemAvailable.
@@ -317,30 +247,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_parse_memory_info() {
-        let meminfo = "MemTotal:       16384000 kB\nMemFree:        8192000 kB\nSwapTotal:       4096000 kB\nSwapFree:        2048000 kB\n";
-        let result = parse_memory_info_content(meminfo);
-        assert!(result.is_ok());
-        let mem = result.unwrap();
-        assert_eq!(mem.total_ram, 16384000 * 1024);
-        assert_eq!(mem.total_swap, 4096000 * 1024);
-    }
-
-    #[test]
-    fn test_parse_memory_info_missing_fields() {
-        let meminfo = "MemFree:        8192000 kB\nSwapFree:        2048000 kB\n";
-        let result = parse_memory_info_content(meminfo);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_cpu_count() {
-        let cpuinfo = "processor\t: 0\nvendor_id\t: GenuineIntel\nprocessor\t: 1\nvendor_id\t: GenuineIntel\n";
-        let count = parse_cpu_count_content(cpuinfo);
-        assert_eq!(count, 2);
-    }
-
     // Helper functions for testing
     fn parse_load_average_line(line: &str) -> Result<LoadAverage, String> {
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -363,43 +269,5 @@ mod tests {
             five_min,
             fifteen_min,
         })
-    }
-
-    fn parse_memory_info_content(content: &str) -> Result<MemoryInfo, String> {
-        let mut total_ram: Option<u64> = None;
-        let mut total_swap: Option<u64> = None;
-
-        for line in content.lines() {
-            if line.starts_with("MemTotal:") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    if let Ok(kb) = parts[1].parse::<u64>() {
-                        total_ram = Some(kb * 1024);
-                    }
-                }
-            } else if line.starts_with("SwapTotal:") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    if let Ok(kb) = parts[1].parse::<u64>() {
-                        total_swap = Some(kb * 1024);
-                    }
-                }
-            }
-        }
-
-        match (total_ram, total_swap) {
-            (Some(ram), Some(swap)) => Ok(MemoryInfo {
-                total_ram: ram,
-                total_swap: swap,
-            }),
-            _ => Err("Failed to parse MemTotal or SwapTotal".to_string()),
-        }
-    }
-
-    fn parse_cpu_count_content(content: &str) -> usize {
-        content
-            .lines()
-            .filter(|line| line.starts_with("processor"))
-            .count()
     }
 }
