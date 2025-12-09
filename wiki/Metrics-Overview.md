@@ -174,6 +174,59 @@ herakles_proc_mem_cache_update_duration_seconds 0.234
 herakles_proc_mem_cache_update_success 1
 ```
 
+## System Metrics
+
+These metrics provide system-wide resource information.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `herakles_system_memory_total_bytes` | Gauge | Total system memory in bytes (MemTotal from /proc/meminfo) |
+| `herakles_system_memory_available_bytes` | Gauge | Available system memory in bytes (MemAvailable from /proc/meminfo) |
+| `herakles_system_memory_used_ratio` | Gauge | Memory used ratio: 1 - (available / total), value between 0.0 and 1.0 |
+| `herakles_system_cpu_usage_ratio` | Gauge | CPU usage ratio per core and total, calculated from /proc/stat deltas |
+| `herakles_system_load1` | Gauge | System load average over 1 minute |
+| `herakles_system_load5` | Gauge | System load average over 5 minutes |
+| `herakles_system_load15` | Gauge | System load average over 15 minutes |
+
+**Labels for CPU metrics:**
+- `cpu` - CPU identifier ("cpu" for total, "cpu0", "cpu1", etc. for individual cores)
+
+**Example output:**
+
+```
+# HELP herakles_system_memory_total_bytes Total system memory in bytes
+# TYPE herakles_system_memory_total_bytes gauge
+herakles_system_memory_total_bytes 16777216000
+
+# HELP herakles_system_memory_available_bytes Available system memory in bytes
+# TYPE herakles_system_memory_available_bytes gauge
+herakles_system_memory_available_bytes 8388608000
+
+# HELP herakles_system_memory_used_ratio Memory used ratio
+# TYPE herakles_system_memory_used_ratio gauge
+herakles_system_memory_used_ratio 0.5
+
+# HELP herakles_system_cpu_usage_ratio CPU usage ratio per core and total
+# TYPE herakles_system_cpu_usage_ratio gauge
+herakles_system_cpu_usage_ratio{cpu="cpu"} 0.35
+herakles_system_cpu_usage_ratio{cpu="cpu0"} 0.40
+herakles_system_cpu_usage_ratio{cpu="cpu1"} 0.30
+herakles_system_cpu_usage_ratio{cpu="cpu2"} 0.35
+herakles_system_cpu_usage_ratio{cpu="cpu3"} 0.35
+
+# HELP herakles_system_load1 System load average over 1 minute
+# TYPE herakles_system_load1 gauge
+herakles_system_load1 1.25
+
+# HELP herakles_system_load5 System load average over 5 minutes
+# TYPE herakles_system_load5 gauge
+herakles_system_load5 1.50
+
+# HELP herakles_system_load15 System load average over 15 minutes
+# TYPE herakles_system_load15 gauge
+herakles_system_load15 1.75
+```
+
 ## Label Cardinality Considerations
 
 High cardinality can cause performance issues in Prometheus. Consider these strategies:
@@ -281,6 +334,28 @@ rate(herakles_proc_mem_cpu_time_seconds[5m]) > 0.9
 
 # Unusual process count
 abs(count(herakles_proc_mem_uss_bytes) - count(herakles_proc_mem_uss_bytes offset 1h)) > 10
+```
+
+### System Monitoring Queries
+
+```promql
+# System memory usage percentage
+herakles_system_memory_used_ratio * 100
+
+# Available memory in GB
+herakles_system_memory_available_bytes / 1024 / 1024 / 1024
+
+# Average CPU usage across all cores
+herakles_system_cpu_usage_ratio{cpu="cpu"}
+
+# Individual core CPU usage
+herakles_system_cpu_usage_ratio{cpu=~"cpu[0-9]+"}
+
+# System load normalized by available cores
+herakles_system_load1 / count(herakles_system_cpu_usage_ratio{cpu=~"cpu[0-9]+"})
+
+# System load trend
+rate(herakles_system_load1[5m])
 ```
 
 ## Next Steps

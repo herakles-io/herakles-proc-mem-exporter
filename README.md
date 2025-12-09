@@ -18,6 +18,8 @@ A high-performance Prometheus exporter for per-process memory and CPU metrics on
 
 ## 📊 Metrics Overview
 
+### Process Metrics
+
 | Metric | Description | Labels |
 |--------|-------------|--------|
 | `herakles_proc_mem_rss_bytes` | Resident Set Size per process | pid, name, group, subgroup |
@@ -27,6 +29,18 @@ A high-performance Prometheus exporter for per-process memory and CPU metrics on
 | `herakles_proc_mem_cpu_time_seconds` | Total CPU time used | pid, name, group, subgroup |
 | `herakles_proc_mem_group_*_sum` | Aggregated metrics per subgroup | group, subgroup |
 | `herakles_proc_mem_top_*` | Top-N metrics per subgroup | group, subgroup, rank, pid, name |
+
+### System Metrics
+
+| Metric | Description | Labels |
+|--------|-------------|--------|
+| `herakles_system_memory_total_bytes` | Total system memory in bytes | - |
+| `herakles_system_memory_available_bytes` | Available system memory in bytes | - |
+| `herakles_system_memory_used_ratio` | Memory used ratio (0.0 to 1.0) | - |
+| `herakles_system_cpu_usage_ratio` | CPU usage ratio per core and total | cpu |
+| `herakles_system_load1` | System load average over 1 minute | - |
+| `herakles_system_load5` | System load average over 5 minutes | - |
+| `herakles_system_load15` | System load average over 15 minutes | - |
 
 ## 📦 Installation
 
